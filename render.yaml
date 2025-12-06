@@ -21,7 +21,7 @@ services:
           property: url
       - key: ADMIN_USER_ID
         sync: false
-      - key: SUPPORT_CHANNEL
+      - key: SUPPORT_CHANNEL_ID
         sync: false
       - key: PYTHON_VERSION
         value: 3.11.0
