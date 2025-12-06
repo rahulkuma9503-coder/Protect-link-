@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, Request, Response
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -34,6 +34,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
+SUPPORT_CHANNEL = os.environ.get("SUPPORT_CHANNEL", "@YourSupportChannel")  # Add this in Render
 
 # MongoDB setup
 client = MongoClient(MONGO_URL)
@@ -84,6 +85,39 @@ async def ensure_user_in_db(user_id: int, username: str = None, first_name: str 
     except Exception as e:
         logger.error(f"Error ensuring user in DB: {e}")
 
+async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if user is member of support channel"""
+    try:
+        if not SUPPORT_CHANNEL:
+            return True  # Allow all if channel not set
+        
+        # Remove @ if present
+        channel = SUPPORT_CHANNEL.replace("@", "")
+        
+        # Try to get chat member
+        member = await context.bot.get_chat_member(f"@{channel}", user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        logger.error(f"Error checking channel membership: {e}")
+        return False
+
+async def send_channel_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, encoded: str = None) -> None:
+    """Send message asking user to join channel"""
+    keyboard = [
+        [InlineKeyboardButton("✅ Join Support Channel", url=f"https://t.me/{SUPPORT_CHANNEL.replace('@', '')}")],
+        [InlineKeyboardButton("🔁 Check Membership", callback_data=f"check_membership_{encoded}")]
+    ]
+    
+    await update.message.reply_text(
+        f"📢 **Channel Verification Required**\n\n"
+        f"To use this bot, you must join our support channel:\n"
+        f"👉 {SUPPORT_CHANNEL}\n\n"
+        f"1. Click the button below to join\n"
+        f"2. Then click 'Check Membership'",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
 # ================== COMMAND HANDLERS ==================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -92,6 +126,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     await ensure_user_in_db(user.id, user.username, user.first_name)
     
+    # Check channel membership for all commands except in private welcome
     if not args:
         welcome_msg = "👋 Welcome! Use /protect <group_link> to create a protected link."
         if str(user.id) == ADMIN_USER_ID:
@@ -101,40 +136,156 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     if args[0].startswith("verify_"):
         encoded = args[0][7:]
-        link_data = links_collection.find_one({"encoded": encoded})
         
-        if not link_data:
-            await update.message.reply_text("❌ Invalid or expired verification link.")
+        # Check if user is in support channel
+        is_member = await is_user_in_channel(user.id, context)
+        
+        if not is_member:
+            await send_channel_verification(update, context, encoded)
             return
         
-        # Check existing CAPTCHA
-        existing = captcha_collection.find_one({"user_id": user.id, "encoded": encoded})
-        if existing:
-            await update.message.reply_text(
-                f"Your pending CAPTCHA: `{existing['captcha_code']}`\nSend it back within 5 minutes.",
+        # User is in channel, proceed with verification
+        await handle_verification_start(update, context, user.id, encoded)
+
+async def handle_verification_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, encoded: str) -> None:
+    """Start verification process for user"""
+    link_data = links_collection.find_one({"encoded": encoded})
+    
+    if not link_data:
+        await update.message.reply_text("❌ Invalid or expired verification link.")
+        return
+    
+    # Check existing CAPTCHA
+    existing = captcha_collection.find_one({"user_id": user_id, "encoded": encoded})
+    if existing:
+        # Show verify button
+        keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
+        await update.message.reply_text(
+            "✅ You have a pending verification.\n\n"
+            "Click the button below to start verification:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    # Generate new CAPTCHA
+    captcha_code = generate_captcha_code()
+    captcha_data = {
+        "user_id": user_id,
+        "encoded": encoded,
+        "captcha_code": captcha_code,
+        "created_at": datetime.utcnow()
+    }
+    
+    try:
+        captcha_collection.insert_one(captcha_data)
+        
+        # Show verify button
+        keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
+        await update.message.reply_text(
+            "🔒 **Verification Required**\n\n"
+            "Click the button below to start the verification process:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except DuplicateKeyError:
+        keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
+        await update.message.reply_text(
+            "✅ Verification session found.\n\n"
+            "Click the button below to continue:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    
+    if query.data.startswith("check_membership_"):
+        encoded = query.data[17:]
+        is_member = await is_user_in_channel(user.id, context)
+        
+        if is_member:
+            await handle_verification_start_from_callback(query, context, user.id, encoded)
+        else:
+            await query.edit_message_text(
+                "❌ You're still not a member of the support channel.\n\n"
+                f"Please join {SUPPORT_CHANNEL} and try again.",
                 parse_mode="Markdown"
             )
-            return
+    
+    elif query.data.startswith("verify_"):
+        encoded = query.data[7:]
+        await handle_captcha_verification(query, context, user.id, encoded)
+    
+    elif query.data.startswith("copy_"):
+        encoded = query.data[5:]
+        bot_username = context.bot.username
+        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
+        await query.edit_message_text(
+            f"✅ **Protected Link Generated**\n\n"
+            f"Share this link with others:\n"
+            f"`{protected_link}`",
+            parse_mode="Markdown"
+        )
+    
+    elif query.data.startswith("share_link_"):
+        encoded = query.data[11:]
+        bot_username = context.bot.username
+        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
         
-        captcha_code = generate_captcha_code()
-        captcha_data = {
-            "user_id": user.id,
-            "encoded": encoded,
-            "captcha_code": captcha_code,
-            "created_at": datetime.utcnow()
-        }
+        share_text = (
+            f"🔗 **Join via Protected Link**\n\n"
+            f"Click below to join through verification:\n"
+            f"{protected_link}"
+        )
         
-        try:
-            captcha_collection.insert_one(captcha_data)
-            await update.message.reply_text(
-                f"🔒 CAPTCHA Code: `{captcha_code}`\nSend it back within 5 minutes.",
-                parse_mode="Markdown"
-            )
-        except DuplicateKeyError:
-            await update.message.reply_text("You already have a pending verification.")
+        keyboard = [[
+            InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
+            InlineKeyboardButton("📋 Copy Link", callback_data=f"copy_{encoded}")
+        ]]
+        
+        await query.edit_message_text(
+            share_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+async def handle_verification_start_from_callback(query, context, user_id: int, encoded: str) -> None:
+    """Start verification from callback"""
+    keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
+    
+    await query.edit_message_text(
+        "✅ **Channel Verified!**\n\n"
+        "Now click the button below to start the CAPTCHA verification:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def handle_captcha_verification(query, context, user_id: int, encoded: str) -> None:
+    """Handle CAPTCHA verification via inline button"""
+    captcha_data = captcha_collection.find_one({"user_id": user_id, "encoded": encoded})
+    
+    if not captcha_data:
+        await query.edit_message_text("❌ No pending verification found.")
+        return
+    
+    # Show CAPTCHA code and ask user to enter it
+    captcha_code = captcha_data["captcha_code"]
+    
+    await query.edit_message_text(
+        f"🔢 **Enter CAPTCHA Code**\n\n"
+        f"Your verification code is: `{captcha_code}`\n\n"
+        f"Please send this 5-digit code back to me within 5 minutes.",
+        parse_mode="Markdown"
+    )
 
 async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    
+    # Check channel membership
+    is_member = await is_user_in_channel(user.id, context)
+    if not is_member:
+        await send_channel_verification(update, context)
+        return
+    
     await ensure_user_in_db(user.id, user.username, user.first_name)
     
     if update.effective_chat.type != "private":
@@ -165,12 +316,18 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
         
         keyboard = [[
-            InlineKeyboardButton("🔗 Share Link", url=f"https://t.me/share/url?url={protected_link}"),
-            InlineKeyboardButton("📋 Copy", callback_data=f"copy_{encoded}")
+            InlineKeyboardButton("🔗 Share Protected Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
+            InlineKeyboardButton("📋 Copy Link", callback_data=f"copy_{encoded}")
         ]]
         
         await update.message.reply_text(
-            f"✅ Link protected!\n\n**Protected Link:** {protected_link}",
+            f"✅ **Link Protected Successfully!**\n\n"
+            f"**Original Link:** {group_link}\n\n"
+            f"**Protected Link:**\n`{protected_link}`\n\n"
+            f"Share the protected link with others. They'll need to:\n"
+            f"1. Join our support channel\n"
+            f"2. Complete verification\n"
+            f"3. Get the group link via button",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -180,12 +337,21 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    
+    # Check channel membership for all messages
+    is_member = await is_user_in_channel(user.id, context)
+    if not is_member:
+        await send_channel_verification(update, context)
+        return
+    
     await ensure_user_in_db(user.id, user.username, user.first_name)
     
     if update.effective_chat.type != "private" or not update.message.text:
         return
     
     message_text = update.message.text.strip()
+    
+    # Handle CAPTCHA code entry
     if len(message_text) == 5 and message_text.isdigit():
         captcha_data = captcha_collection.find_one({"user_id": user.id})
         
@@ -193,17 +359,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if message_text == captcha_data["captcha_code"]:
                 link_data = links_collection.find_one({"encoded": captcha_data["encoded"]})
                 if link_data:
-                    await update.message.reply_text(f"✅ Verified! Group link: {link_data['group_link']}")
+                    # Send group link as button (NOT directly)
+                    keyboard = [[
+                        InlineKeyboardButton("🚀 Join Group", url=link_data["group_link"]),
+                        InlineKeyboardButton("📤 Share Protected Link", callback_data=f"share_link_{captcha_data['encoded']}")
+                    ]]
+                    
+                    await update.message.reply_text(
+                        f"✅ **Verification Successful!**\n\n"
+                        f"Click the button below to join the group:\n\n"
+                        f"After joining, you can share the protected link with others.",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                    
+                    # Cleanup and update stats
                     captcha_collection.delete_one({"user_id": user.id})
                     links_collection.update_one(
                         {"encoded": captcha_data["encoded"]},
                         {"$inc": {"verification_count": 1}}
                     )
                 else:
-                    await update.message.reply_text("❌ Link expired.")
+                    await update.message.reply_text("❌ Link has expired.")
                     captcha_collection.delete_one({"user_id": user.id})
             else:
-                await update.message.reply_text("❌ Incorrect code.")
+                await update.message.reply_text("❌ Incorrect code. Please try again.")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -291,7 +471,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"📊 **Stats**\n"
         f"• Users: {total_users}\n"
         f"• Active Today: {today_users}\n"
-        f"• Links: {total_links}",
+        f"• Links: {total_links}\n"
+        f"• Support Channel: {SUPPORT_CHANNEL}",
         parse_mode="Markdown"
     )
 
@@ -325,19 +506,10 @@ async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"🤖 **Health Check**\n"
         f"• MongoDB: {mongo_status}\n"
         f"• Users: {users_collection.count_documents({})}\n"
-        f"• Links: {links_collection.count_documents({})}",
+        f"• Links: {links_collection.count_documents({})}\n"
+        f"• Support Channel: {SUPPORT_CHANNEL}",
         parse_mode="Markdown"
     )
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data.startswith("copy_"):
-        encoded = query.data[5:]
-        bot_username = context.bot.username
-        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
-        await query.edit_message_text(f"✅ Link: `{protected_link}`", parse_mode="Markdown")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Update {update} caused error: {context.error}")
@@ -353,8 +525,13 @@ async def lifespan(app: FastAPI):
     
     # Set webhook
     webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
-    await ptb_app.bot.set_webhook(webhook_url, allowed_updates=["message", "callback_query"])
+    await ptb_app.bot.set_webhook(
+        webhook_url, 
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=True
+    )
     logger.info(f"Webhook set to: {webhook_url}")
+    logger.info(f"Support Channel: {SUPPORT_CHANNEL}")
     
     yield
     
@@ -390,7 +567,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "support_channel": SUPPORT_CHANNEL}
 
 if __name__ == "__main__":
     import uvicorn
