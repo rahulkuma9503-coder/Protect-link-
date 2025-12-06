@@ -4,6 +4,7 @@ import secrets
 import string
 import asyncio
 import re
+import html
 from datetime import datetime
 from contextlib import asynccontextmanager
 from http import HTTPStatus
@@ -36,7 +37,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-SUPPORT_CHANNEL_ID = os.environ.get("SUPPORT_CHANNEL_ID")  # Channel ID (e.g., -1001234567890)
+SUPPORT_CHANNEL_ID = os.environ.get("SUPPORT_CHANNEL_ID")
 
 # MongoDB setup
 client = MongoClient(MONGO_URL)
@@ -73,6 +74,22 @@ def generate_encoded_string(length: int = 16) -> str:
 
 def generate_captcha_code() -> str:
     return ''.join(secrets.choice(string.digits) for _ in range(5))
+
+def escape_markdown(text: str) -> str:
+    """Escape special Markdown characters including underscores"""
+    if not text:
+        return ""
+    # Escape all Markdown special characters
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+def escape_html_special(text: str) -> str:
+    """Escape HTML special characters for Telegram HTML mode"""
+    if not text:
+        return ""
+    return html.escape(text)
 
 async def ensure_user_in_db(user_id: int, username: str = None, first_name: str = None) -> None:
     """Fixed MongoDB update to avoid conflict error"""
@@ -128,14 +145,13 @@ async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
             # Update channel info
             channel_info.update({
                 "id": chat.id,
-                "title": chat.title,
+                "title": escape_markdown(chat.title),
                 "username": chat.username,
                 "type": chat.type
             })
             
             # Try to generate invite link
             try:
-                # First try to create an invite link
                 invite_link = await context.bot.create_chat_invite_link(
                     chat_id=channel_id,
                     member_limit=1,
@@ -150,15 +166,13 @@ async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
                     channel_info["invite_link"] = f"https://t.me/{chat.username}"
                 else:
                     # Last resort: Use t.me/c/ format for private channels
-                    # Channel IDs are negative, remove the -100 prefix
-                    channel_id_clean = str(abs(chat.id))[3:]  # Remove first 3 digits (100)
+                    channel_id_clean = str(abs(chat.id))[3:]
                     channel_info["invite_link"] = f"https://t.me/c/{channel_id_clean}"
             
             logger.info(f"Channel info loaded: {channel_info['title']} (ID: {channel_info['id']})")
             
     except Exception as e:
         logger.error(f"Error getting channel info: {e}")
-        # Set default fallback link
         channel_info["invite_link"] = f"https://t.me/c/{SUPPORT_CHANNEL_ID[4:]}" if SUPPORT_CHANNEL_ID and len(SUPPORT_CHANNEL_ID) > 4 else None
     
     return channel_info
@@ -167,17 +181,14 @@ async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
     """Check if user is member of support channel using channel ID"""
     try:
         if not SUPPORT_CHANNEL_ID:
-            logger.warning("SUPPORT_CHANNEL_ID not configured, skipping check")
             return True
         
         channel_id = int(SUPPORT_CHANNEL_ID)
         
-        # Get chat member using channel ID
         try:
             member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
             status = member.status
             
-            # User is considered member if they have one of these statuses
             if status in ["member", "administrator", "creator"]:
                 return True
             else:
@@ -199,17 +210,9 @@ async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
         logger.error(f"Unexpected error checking channel membership: {e}")
         return False
 
-async def send_admin_alert(context: ContextTypes.DEFAULT_TYPE, message: str):
-    """Send alert to admin"""
-    try:
-        await context.bot.send_message(chat_id=ADMIN_USER_ID, text=message)
-    except Exception as e:
-        logger.error(f"Failed to send admin alert: {e}")
-
 async def send_channel_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str = None) -> None:
     """Send message asking user to join channel with generated invite link"""
     if not SUPPORT_CHANNEL_ID:
-        # If channel not configured, just allow
         return
     
     # Get channel info and generate invite link
@@ -276,6 +279,11 @@ def validate_telegram_link(link: str) -> bool:
     
     return False
 
+def format_link_without_preview(link: str) -> str:
+    """Format link to avoid preview and restrict copying"""
+    # Replace underscores with a zero-width space to break link detection
+    return link.replace('_', '_​')  # _ + zero-width space
+
 # ================== COMMAND HANDLERS ==================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -295,7 +303,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         welcome_msg = "👋 Welcome! Use /protect <group_link> to create a protected link."
         if str(user.id) == ADMIN_USER_ID:
             welcome_msg += "\n\n👑 Admin commands available: /broadcast, /stats, /users, /health"
-        await update.message.reply_text(welcome_msg)
+        await update.message.reply_text(welcome_msg, disable_web_page_preview=True)
         return
     
     if args[0].startswith("verify_"):
@@ -316,7 +324,7 @@ async def handle_verification_start(update: Update, context: ContextTypes.DEFAUL
     link_data = links_collection.find_one({"encoded": encoded})
     
     if not link_data:
-        await update.message.reply_text("❌ Invalid or expired verification link.")
+        await update.message.reply_text("❌ Invalid or expired verification link.", disable_web_page_preview=True)
         return
     
     # Check existing CAPTCHA
@@ -426,10 +434,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         encoded = query.data[5:]
         bot_username = context.bot.username
         protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
+        
+        # Format protected link to prevent preview and make copying difficult
+        protected_link_escaped = escape_markdown(protected_link)
+        protected_link_formatted = format_link_without_preview(protected_link_escaped)
+        
         await query.edit_message_text(
             f"✅ **Protected Link Generated**\n\n"
             f"Share this link with others:\n"
-            f"`{protected_link}`",
+            f"```\n{protected_link_formatted}\n```\n\n"
+            f"⚠️ *Note: Clicking will start verification process*",
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
@@ -441,13 +455,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         share_text = (
             f"🔗 **Join via Protected Link**\n\n"
-            f"Click below to join through verification:\n"
-            f"{protected_link}"
+            f"Users will need to complete verification to join."
         )
         
         keyboard = [[
             InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
-            InlineKeyboardButton("📋 Copy Link", callback_data=f"copy_{encoded}")
+            InlineKeyboardButton("📋 Copy Protected Link", callback_data=f"copy_{encoded}")
         ]]
         
         await query.edit_message_text(
@@ -458,7 +471,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
     
     elif query.data.startswith("users_"):
-        # Handle users pagination
         page = int(query.data[6:])
         await handle_users_pagination(query, context, page)
 
@@ -478,7 +490,7 @@ async def handle_captcha_verification(query, context, user_id: int, encoded: str
     captcha_data = captcha_collection.find_one({"user_id": user_id, "encoded": encoded})
     
     if not captcha_data:
-        await query.edit_message_text("❌ No pending verification found.")
+        await query.edit_message_text("❌ No pending verification found.", disable_web_page_preview=True)
         return
     
     # Show CAPTCHA code and ask user to enter it
@@ -505,7 +517,7 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await ensure_user_in_db(user.id, user.username, user.first_name)
     
     if update.effective_chat.type != "private":
-        await update.message.reply_text("⚠️ Please use this in private chat.")
+        await update.message.reply_text("⚠️ Please use this in private chat.", disable_web_page_preview=True)
         return
     
     if not context.args:
@@ -552,22 +564,23 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         bot_username = context.bot.username
         protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
         
+        # Escape Markdown special characters including underscores
+        protected_link_escaped = escape_markdown(protected_link)
+        
         keyboard = [[
             InlineKeyboardButton("🔗 Share Protected Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
-            InlineKeyboardButton("📋 Copy Link", callback_data=f"copy_{encoded}")
+            InlineKeyboardButton("📋 Copy Protected Link", callback_data=f"copy_{encoded}")
         ]]
-        
-        # Escape Markdown special characters in the link
-        escaped_link = protected_link.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]')
         
         await update.message.reply_text(
             f"✅ **Link Protected Successfully!**\n\n"
-            f"**Original Link:** {group_link}\n\n"
-            f"**Protected Link:**\n`{protected_link}`\n\n"
+            f"**Protected Link:**\n"
+            f"```\n{protected_link_escaped}\n```\n\n"
             f"Share the protected link with others. They'll need to:\n"
             f"1. Join our support channel\n"
             f"2. Complete verification\n"
-            f"3. Get the group link via button",
+            f"3. Get access via button (link cannot be copied)\n\n"
+            f"⚠️ *The final group link is protected and cannot be copied*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
             disable_web_page_preview=True
@@ -604,16 +617,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if message_text == captcha_data["captcha_code"]:
                 link_data = links_collection.find_one({"encoded": captcha_data["encoded"]})
                 if link_data:
-                    # Send group link as button (NOT directly)
+                    # Create a one-time join button - DO NOT show the actual link
+                    # Use a direct join button without exposing the URL
                     keyboard = [[
-                        InlineKeyboardButton("🚀 Join Group", url=link_data["group_link"]),
+                        InlineKeyboardButton("🚀 Join Now (One-Time Link)", url=link_data["group_link"]),
                         InlineKeyboardButton("📤 Share Protected Link", callback_data=f"share_link_{captcha_data['encoded']}")
                     ]]
+                    
+                    # Format group link to make copying difficult
+                    group_link_formatted = format_link_without_preview(link_data["group_link"])
+                    group_link_display = escape_markdown(group_link_formatted)
                     
                     await update.message.reply_text(
                         f"✅ **Verification Successful!**\n\n"
                         f"Click the button below to join the group:\n\n"
-                        f"After joining, you can share the protected link with others.",
+                        f"⚠️ **Important:**\n"
+                        f"• The join link is one-time use\n"
+                        f"• Link cannot be copied or shared\n"
+                        f"• Click the button to join directly\n\n"
+                        f"After joining, you can share the protected verification link with others.",
                         reply_markup=InlineKeyboardMarkup(keyboard),
                         parse_mode="Markdown",
                         disable_web_page_preview=True
@@ -709,14 +731,12 @@ async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 except:
                     pass
             
-            # Small delay to avoid rate limits
             await asyncio.sleep(0.1)
             
         except Exception as e:
             failed_count += 1
             logger.error(f"Failed to send to user {user_id}: {e}")
             
-            # Remove user if they blocked the bot
             if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
                 users_collection.delete_one({"user_id": user_id})
     
@@ -762,7 +782,6 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         user_id = user_data["user_id"]
         
         try:
-            # Forward the message based on its type
             if replied_message.text:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -808,7 +827,7 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     chat_id=user_id,
                     sticker=replied_message.sticker.file_id
                 )
-            elif replied_message.animation:  # GIFs
+            elif replied_message.animation:
                 await context.bot.send_animation(
                     chat_id=user_id,
                     animation=replied_message.animation.file_id,
@@ -824,7 +843,6 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             
             success_count += 1
             
-            # Update status every 10 messages
             if (success_count + failed_count) % 10 == 0:
                 try:
                     await status_msg.edit_text(
@@ -837,14 +855,12 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 except:
                     pass
             
-            # Small delay to avoid rate limits
             await asyncio.sleep(0.1)
             
         except Exception as e:
             failed_count += 1
             logger.error(f"Failed to send to user {user_id}: {e}")
             
-            # Remove user if they blocked the bot
             if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
                 users_collection.delete_one({"user_id": user_id})
     
@@ -880,7 +896,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     total_links = links_collection.count_documents({})
     total_captchas = captcha_collection.count_documents({})
     
-    # Get today's stats
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     today_users = users_collection.count_documents({"last_active": {"$gte": today}})
     
@@ -913,7 +928,6 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ This command is only for administrators.")
         return
     
-    # Parse page number from args
     page = 1
     if context.args:
         try:
@@ -928,7 +942,6 @@ async def handle_users_pagination(update, context, page: int = 1):
     page_size = 10
     skip = (page - 1) * page_size
     
-    # Get users for this page
     users_list = list(users_collection.find(
         {},
         {"user_id": 1, "username": 1, "first_name": 1, "last_active": 1}
@@ -959,7 +972,6 @@ async def handle_users_pagination(update, context, page: int = 1):
     
     users_text += f"📄 Page {page}/{total_pages} • Total Users: {total_users}"
     
-    # Create pagination buttons
     keyboard = []
     if page > 1:
         keyboard.append([InlineKeyboardButton("⬅️ Previous", callback_data=f"users_{page-1}")])
@@ -989,16 +1001,13 @@ async def handle_users_pagination(update, context, page: int = 1):
 async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Health check command"""
     try:
-        # Check MongoDB connection
         client.admin.command('ping')
         mongo_status = "✅ Connected"
     except Exception as e:
         mongo_status = f"❌ Error: {e}"
     
-    # Get bot info
     bot_info = await context.bot.get_me()
     
-    # Get channel info
     channel = await get_channel_info(context)
     
     status_text = (
@@ -1040,7 +1049,6 @@ async def lifespan(app: FastAPI):
     await ptb_app.initialize()
     await ptb_app.start()
     
-    # Set webhook
     webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
     await ptb_app.bot.set_webhook(
         webhook_url, 
