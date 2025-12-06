@@ -1,2 +1,4 @@
 python-telegram-bot[webhooks]==20.7
 pymongo[srv]==4.6.0
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
