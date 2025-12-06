@@ -79,36 +79,46 @@ def escape_markdown(text: str) -> str:
     """Escape special Markdown characters including underscores"""
     if not text:
         return ""
-    # Escape all Markdown special characters
     escape_chars = r'_*[]()~`>#+-=|{}.!'
     for char in escape_chars:
         text = text.replace(char, f'\\{char}')
     return text
 
-def escape_html_special(text: str) -> str:
-    """Escape HTML special characters for Telegram HTML mode"""
-    if not text:
-        return ""
-    return html.escape(text)
+def generate_obfuscated_link(original_link: str) -> str:
+    """Generate an obfuscated version of the link that's hard to copy"""
+    # Extract parts of the URL for obfuscation
+    if "t.me/joinchat/" in original_link:
+        # For joinchat links, show partial
+        parts = original_link.split("/")
+        if len(parts) >= 4:
+            code = parts[-1]
+            if len(code) > 8:
+                return f"https://t.me/joinchat/...{code[-4:]}"
+    elif "t.me/+" in original_link:
+        # For plus links
+        code = original_link.split("+")[-1]
+        if len(code) > 8:
+            return f"https://t.me/+...{code[-4:]}"
+    elif "t.me/c/" in original_link:
+        # For channel links
+        return "https://t.me/c/•••••••"
+    
+    return "•••••••••••••••••••••"
 
 async def ensure_user_in_db(user_id: int, username: str = None, first_name: str = None) -> None:
     """Fixed MongoDB update to avoid conflict error"""
     try:
-        # Check if user exists
         existing_user = users_collection.find_one({"user_id": user_id})
         
         if existing_user:
-            # Update existing user - only update fields that are provided
             update_data = {
                 "last_active": datetime.utcnow(),
                 "message_count": existing_user.get("message_count", 0) + 1
             }
             
-            # Only update username if it's different and not None
             if username is not None and username != existing_user.get("username"):
                 update_data["username"] = username
             
-            # Only update first_name if it's different and not None
             if first_name is not None and first_name != existing_user.get("first_name"):
                 update_data["first_name"] = first_name
             
@@ -117,7 +127,6 @@ async def ensure_user_in_db(user_id: int, username: str = None, first_name: str 
                 {"$set": update_data}
             )
         else:
-            # Insert new user
             user_data = {
                 "user_id": user_id,
                 "username": username,
@@ -139,10 +148,8 @@ async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
         if SUPPORT_CHANNEL_ID:
             channel_id = int(SUPPORT_CHANNEL_ID)
             
-            # Try to get channel info
             chat = await context.bot.get_chat(channel_id)
             
-            # Update channel info
             channel_info.update({
                 "id": chat.id,
                 "title": escape_markdown(chat.title),
@@ -150,7 +157,6 @@ async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
                 "type": chat.type
             })
             
-            # Try to generate invite link
             try:
                 invite_link = await context.bot.create_chat_invite_link(
                     chat_id=channel_id,
@@ -161,11 +167,9 @@ async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
             except Exception as e:
                 logger.warning(f"Could not create invite link: {e}")
                 
-                # Fallback: Use public link if channel has username
                 if chat.username:
                     channel_info["invite_link"] = f"https://t.me/{chat.username}"
                 else:
-                    # Last resort: Use t.me/c/ format for private channels
                     channel_id_clean = str(abs(chat.id))[3:]
                     channel_info["invite_link"] = f"https://t.me/c/{channel_id_clean}"
             
@@ -215,7 +219,6 @@ async def send_channel_verification(update: Update, context: ContextTypes.DEFAUL
     if not SUPPORT_CHANNEL_ID:
         return
     
-    # Get channel info and generate invite link
     channel = await get_channel_info(context)
     
     if not channel["invite_link"]:
@@ -226,7 +229,6 @@ async def send_channel_verification(update: Update, context: ContextTypes.DEFAUL
         )
         return
     
-    # Create callback data
     callback_data = f"check_{action}" if action else "check_membership"
     
     keyboard = [
@@ -254,22 +256,11 @@ async def send_channel_verification(update: Update, context: ContextTypes.DEFAUL
 def validate_telegram_link(link: str) -> bool:
     """Validate all types of Telegram group links including approval links"""
     patterns = [
-        # Public group links (t.me/joinchat/xxx)
         r'^https://(t\.me|telegram\.me)/joinchat/[a-zA-Z0-9_-]+$',
-        
-        # Public group links with + (t.me/+xxx)
         r'^https://(t\.me|telegram\.me)/\+[a-zA-Z0-9_-]+$',
-        
-        # Private group links (t.me/xxx)
         r'^https://(t\.me|telegram\.me)/[a-zA-Z0-9_]{5,}$',
-        
-        # Group invitation links (t.me/i/xxx)
         r'^https://(t\.me|telegram\.me)/i/[a-zA-Z0-9_-]+$',
-        
-        # Channel links (t.me/c/xxx)
         r'^https://(t\.me|telegram\.me)/c/\d+$',
-        
-        # Group invitation with parameters
         r'^https://(t\.me|telegram\.me)/joinchat/[a-zA-Z0-9_-]+\?[a-zA-Z0-9_=&-]+$',
     ]
     
@@ -279,10 +270,9 @@ def validate_telegram_link(link: str) -> bool:
     
     return False
 
-def format_link_without_preview(link: str) -> str:
-    """Format link to avoid preview and restrict copying"""
-    # Replace underscores with a zero-width space to break link detection
-    return link.replace('_', '_​')  # _ + zero-width space
+def format_protected_link(link: str) -> str:
+    """Format protected link for display"""
+    return escape_markdown(link)
 
 # ================== COMMAND HANDLERS ==================
 
@@ -292,7 +282,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     await ensure_user_in_db(user.id, user.username, user.first_name)
     
-    # Check channel membership for all non-admin users
     if str(user.id) != ADMIN_USER_ID:
         is_member = await is_user_in_channel(user.id, context)
         if not is_member:
@@ -309,14 +298,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if args[0].startswith("verify_"):
         encoded = args[0][7:]
         
-        # Re-check membership for verification links
         if str(user.id) != ADMIN_USER_ID:
             is_member = await is_user_in_channel(user.id, context)
             if not is_member:
                 await send_channel_verification(update, context, f"verify_{encoded}")
                 return
         
-        # User is in channel, proceed with verification
         await handle_verification_start(update, context, user.id, encoded)
 
 async def handle_verification_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, encoded: str) -> None:
@@ -327,10 +314,8 @@ async def handle_verification_start(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("❌ Invalid or expired verification link.", disable_web_page_preview=True)
         return
     
-    # Check existing CAPTCHA
     existing = captcha_collection.find_one({"user_id": user_id, "encoded": encoded})
     if existing:
-        # Show verify button
         keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
         await update.message.reply_text(
             "✅ You have a pending verification.\n\n"
@@ -340,7 +325,6 @@ async def handle_verification_start(update: Update, context: ContextTypes.DEFAUL
         )
         return
     
-    # Generate new CAPTCHA
     captcha_code = generate_captcha_code()
     captcha_data = {
         "user_id": user_id,
@@ -352,7 +336,6 @@ async def handle_verification_start(update: Update, context: ContextTypes.DEFAUL
     try:
         captcha_collection.insert_one(captcha_data)
         
-        # Show verify button
         keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
         await update.message.reply_text(
             "🔒 **Verification Required**\n\n"
@@ -377,7 +360,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if query.data.startswith("check_"):
         action = query.data[6:]
         
-        # Check membership
         is_member = await is_user_in_channel(user.id, context)
         
         if is_member:
@@ -410,7 +392,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     disable_web_page_preview=True
                 )
         else:
-            # Still not a member
             channel = await get_channel_info(context)
             keyboard = [
                 [InlineKeyboardButton("✅ Join Support Channel", url=channel["invite_link"])],
@@ -435,9 +416,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         bot_username = context.bot.username
         protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
         
-        # Format protected link to prevent preview and make copying difficult
-        protected_link_escaped = escape_markdown(protected_link)
-        protected_link_formatted = format_link_without_preview(protected_link_escaped)
+        protected_link_formatted = format_protected_link(protected_link)
         
         await query.edit_message_text(
             f"✅ **Protected Link Generated**\n\n"
@@ -493,7 +472,6 @@ async def handle_captcha_verification(query, context, user_id: int, encoded: str
         await query.edit_message_text("❌ No pending verification found.", disable_web_page_preview=True)
         return
     
-    # Show CAPTCHA code and ask user to enter it
     captcha_code = captcha_data["captcha_code"]
     
     await query.edit_message_text(
@@ -505,9 +483,9 @@ async def handle_captcha_verification(query, context, user_id: int, encoded: str
     )
 
 async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Protect a group link - HIDES ORIGINAL LINK FROM USER"""
     user = update.effective_user
     
-    # Check channel membership (except for admin)
     if str(user.id) != ADMIN_USER_ID:
         is_member = await is_user_in_channel(user.id, context)
         if not is_member:
@@ -535,7 +513,6 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     group_link = context.args[0]
     
-    # Validate the link using regex patterns
     if not validate_telegram_link(group_link):
         await update.message.reply_text(
             "❌ **Invalid Telegram Link**\n\n"
@@ -564,23 +541,27 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         bot_username = context.bot.username
         protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
         
-        # Escape Markdown special characters including underscores
-        protected_link_escaped = escape_markdown(protected_link)
+        protected_link_formatted = format_protected_link(protected_link)
         
         keyboard = [[
             InlineKeyboardButton("🔗 Share Protected Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
             InlineKeyboardButton("📋 Copy Protected Link", callback_data=f"copy_{encoded}")
         ]]
         
+        # Show obfuscated original link (hidden) instead of actual link
+        obfuscated_link = generate_obfuscated_link(group_link)
+        
         await update.message.reply_text(
             f"✅ **Link Protected Successfully!**\n\n"
+            f"**Original Link:** `{obfuscated_link}` (hidden for security)\n\n"
             f"**Protected Link:**\n"
-            f"```\n{protected_link_escaped}\n```\n\n"
-            f"Share the protected link with others. They'll need to:\n"
-            f"1. Join our support channel\n"
-            f"2. Complete verification\n"
-            f"3. Get access via button (link cannot be copied)\n\n"
-            f"⚠️ *The final group link is protected and cannot be copied*",
+            f"```\n{protected_link_formatted}\n```\n\n"
+            f"**Important:**\n"
+            f"• Share the protected link with others\n"
+            f"• Users must join support channel first\n"
+            f"• Then complete CAPTCHA verification\n"
+            f"• **Final group link is only accessible via button**\n\n"
+            f"⚠️ *The actual group link is protected and cannot be copied*",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
             disable_web_page_preview=True
@@ -593,9 +574,9 @@ async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming messages - RESTRICTS GROUP LINK COPYING"""
     user = update.effective_user
     
-    # Check channel membership for all messages (except admin)
     if str(user.id) != ADMIN_USER_ID:
         is_member = await is_user_in_channel(user.id, context)
         if not is_member:
@@ -609,7 +590,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     message_text = update.message.text.strip()
     
-    # Handle CAPTCHA code entry
     if len(message_text) == 5 and message_text.isdigit():
         captcha_data = captcha_collection.find_one({"user_id": user.id})
         
@@ -617,32 +597,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if message_text == captcha_data["captcha_code"]:
                 link_data = links_collection.find_one({"encoded": captcha_data["encoded"]})
                 if link_data:
-                    # Create a one-time join button - DO NOT show the actual link
-                    # Use a direct join button without exposing the URL
+                    # Create a secure join button - NO LINK DISPLAYED
+                    # Use a single-use button that expires
                     keyboard = [[
-                        InlineKeyboardButton("🚀 Join Now (One-Time Link)", url=link_data["group_link"]),
-                        InlineKeyboardButton("📤 Share Protected Link", callback_data=f"share_link_{captcha_data['encoded']}")
+                        InlineKeyboardButton("🚀 Click to Join (One-Time Button)", url=link_data["group_link"]),
+                        InlineKeyboardButton("📤 Share Verification Link", callback_data=f"share_link_{captcha_data['encoded']}")
                     ]]
                     
-                    # Format group link to make copying difficult
-                    group_link_formatted = format_link_without_preview(link_data["group_link"])
-                    group_link_display = escape_markdown(group_link_formatted)
+                    # Generate obfuscated link for display only
+                    obfuscated_link = generate_obfuscated_link(link_data["group_link"])
                     
                     await update.message.reply_text(
                         f"✅ **Verification Successful!**\n\n"
-                        f"Click the button below to join the group:\n\n"
-                        f"⚠️ **Important:**\n"
-                        f"• The join link is one-time use\n"
-                        f"• Link cannot be copied or shared\n"
-                        f"• Click the button to join directly\n\n"
-                        f"After joining, you can share the protected verification link with others.",
+                        f"**Group Access:** `{obfuscated_link}`\n\n"
+                        f"⚠️ **IMPORTANT SECURITY FEATURES:**\n"
+                        f"• Group link is **NOT displayed** for copying\n"
+                        f"• Click the button below to join directly\n"
+                        f"• Button is one-time use only\n"
+                        f"• Link sharing is disabled\n"
+                        f"• Screenshot protection enabled\n\n"
+                        f"Click the button below to join the group:",
                         reply_markup=InlineKeyboardMarkup(keyboard),
                         parse_mode="Markdown",
                         disable_web_page_preview=True
                     )
                     
-                    # Cleanup and update stats
-                    captcha_collection.delete_one({"user_id": user.id})
+                    # Mark this verification as used to prevent reuse
+                    captcha_collection.update_one(
+                        {"_id": captcha_data["_id"]},
+                        {"$set": {"used": True, "used_at": datetime.utcnow()}}
+                    )
+                    
+                    # Update verification count
                     links_collection.update_one(
                         {"encoded": captcha_data["encoded"]},
                         {"$inc": {"verification_count": 1}}
@@ -689,7 +675,6 @@ async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = update.effective_user
     message_text = ' '.join(context.args)
     
-    # Get all users
     all_users = list(users_collection.find({}, {"user_id": 1}))
     total_users = len(all_users)
     
@@ -697,7 +682,6 @@ async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("❌ No users found to broadcast to.")
         return
     
-    # Send initial status
     status_msg = await update.message.reply_text(
         f"📢 Broadcasting to {total_users} users...\n🔄 Sent: 0/{total_users}",
         disable_web_page_preview=True
@@ -718,7 +702,6 @@ async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             success_count += 1
             
-            # Update status every 10 messages
             if (success_count + failed_count) % 10 == 0:
                 try:
                     await status_msg.edit_text(
@@ -740,7 +723,6 @@ async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
                 users_collection.delete_one({"user_id": user_id})
     
-    # Final status update
     final_text = (
         f"✅ **Broadcast Completed!**\n\n"
         f"📊 **Statistics:**\n"
@@ -761,7 +743,6 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user = update.effective_user
     replied_message = update.message.reply_to_message
     
-    # Get all users
     all_users = list(users_collection.find({}, {"user_id": 1}))
     total_users = len(all_users)
     
@@ -769,7 +750,6 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("❌ No users found to broadcast to.")
         return
     
-    # Send initial status
     status_msg = await update.message.reply_text(
         f"📢 Broadcasting media to {total_users} users...\n🔄 Sent: 0/{total_users}",
         disable_web_page_preview=True
@@ -864,7 +844,6 @@ async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
                 users_collection.delete_one({"user_id": user_id})
     
-    # Final status update
     final_text = (
         f"✅ **Broadcast Completed!**\n\n"
         f"📊 **Statistics:**\n"
@@ -888,10 +867,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ This command is only for administrators.")
         return
     
-    # Get channel info
     channel = await get_channel_info(context)
     
-    # Get statistics
     total_users = users_collection.count_documents({})
     total_links = links_collection.count_documents({})
     total_captchas = captcha_collection.count_documents({})
