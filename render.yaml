@@ -2,8 +2,13 @@ services:
   - type: web
     name: telegram-bot
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    buildCommand: |
+      pip install --upgrade pip
+      pip install python-telegram-bot[webhooks]==20.7
+      pip install pymongo[srv]==4.6.0
+      pip install fastapi==0.104.1
+      pip install uvicorn[standard]==0.24.0
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -16,7 +21,9 @@ services:
           property: url
       - key: ADMIN_USER_ID
         sync: false
+      - key: SUPPORT_CHANNEL
+        sync: false
       - key: PYTHON_VERSION
         value: 3.11.0
-    healthCheckPath: /
+    healthCheckPath: /health
     autoDeploy: true
