@@ -35,7 +35,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-SUPPORT_CHANNEL = os.environ.get("SUPPORT_CHANNEL", "@YourSupportChannel")
+SUPPORT_CHANNEL_ID = os.environ.get("SUPPORT_CHANNEL_ID")  # Channel ID (e.g., -1001234567890)
 
 # MongoDB setup
 client = MongoClient(MONGO_URL)
@@ -55,6 +55,15 @@ broadcasts_collection.create_index("broadcast_id", unique=True)
 
 # Initialize PTB Application
 ptb_app = Application.builder().token(BOT_TOKEN).updater(None).build()
+
+# Channel cache
+channel_info = {
+    "id": None,
+    "title": "Support Channel",
+    "username": None,
+    "invite_link": None,
+    "type": "channel"
+}
 
 # Helper functions
 def generate_encoded_string(length: int = 16) -> str:
@@ -86,23 +95,69 @@ async def ensure_user_in_db(user_id: int, username: str = None, first_name: str 
     except Exception as e:
         logger.error(f"Error ensuring user in DB: {e}")
 
-async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if user is member of support channel with proper error handling"""
+async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
+    """Get channel information and generate invite link"""
+    global channel_info
+    
     try:
-        if not SUPPORT_CHANNEL or SUPPORT_CHANNEL == "@YourSupportChannel":
-            logger.warning("SUPPORT_CHANNEL not configured, skipping check")
+        if SUPPORT_CHANNEL_ID:
+            channel_id = int(SUPPORT_CHANNEL_ID)
+            
+            # Try to get channel info
+            chat = await context.bot.get_chat(channel_id)
+            
+            # Update channel info
+            channel_info.update({
+                "id": chat.id,
+                "title": chat.title,
+                "username": chat.username,
+                "type": chat.type
+            })
+            
+            # Try to generate invite link
+            try:
+                # First try to create an invite link
+                invite_link = await context.bot.create_chat_invite_link(
+                    chat_id=channel_id,
+                    member_limit=1,
+                    creates_join_request=False
+                )
+                channel_info["invite_link"] = invite_link.invite_link
+            except Exception as e:
+                logger.warning(f"Could not create invite link: {e}")
+                
+                # Fallback: Use public link if channel has username
+                if chat.username:
+                    channel_info["invite_link"] = f"https://t.me/{chat.username}"
+                else:
+                    # Last resort: Use t.me/c/ format for private channels
+                    # Channel IDs are negative, remove the -100 prefix
+                    channel_id_clean = str(abs(chat.id))[3:]  # Remove first 3 digits (100)
+                    channel_info["invite_link"] = f"https://t.me/c/{channel_id_clean}"
+            
+            logger.info(f"Channel info loaded: {channel_info['title']} (ID: {channel_info['id']})")
+            
+    except Exception as e:
+        logger.error(f"Error getting channel info: {e}")
+        # Set default fallback link
+        channel_info["invite_link"] = f"https://t.me/c/{SUPPORT_CHANNEL_ID[4:]}" if SUPPORT_CHANNEL_ID and len(SUPPORT_CHANNEL_ID) > 4 else None
+    
+    return channel_info
+
+async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if user is member of support channel using channel ID"""
+    try:
+        if not SUPPORT_CHANNEL_ID:
+            logger.warning("SUPPORT_CHANNEL_ID not configured, skipping check")
             return True
         
-        # Clean channel username
-        channel = SUPPORT_CHANNEL.replace("@", "").strip()
-        if not channel:
-            return True
+        channel_id = int(SUPPORT_CHANNEL_ID)
         
-        logger.info(f"Checking membership for user {user_id} in channel {channel}")
+        logger.info(f"Checking membership for user {user_id} in channel ID: {channel_id}")
         
-        # Get chat member
+        # Get chat member using channel ID
         try:
-            member = await context.bot.get_chat_member(f"@{channel}", user_id)
+            member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
             status = member.status
             
             # User is considered member if they have one of these statuses
@@ -114,24 +169,27 @@ async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
                 return False
                 
         except BadRequest as e:
-            if "user not found" in str(e).lower() or "chat not found" in str(e).lower():
+            if "user not found" in str(e).lower():
                 logger.info(f"User {user_id} is not a member (not found in channel)")
                 return False
+            elif "chat not found" in str(e).lower():
+                logger.error(f"Channel with ID {channel_id} not found or bot not in channel")
+                await send_admin_alert(context, f"⚠️ Bot cannot access channel ID: {channel_id}. Make sure bot is added as admin.")
+                return False
             elif "not enough rights" in str(e).lower():
-                logger.error(f"Bot doesn't have admin rights in channel @{channel}")
-                await send_admin_alert(context, f"⚠️ Bot needs admin rights in @{channel} to check membership")
+                logger.error(f"Bot doesn't have admin rights in channel ID: {channel_id}")
+                await send_admin_alert(context, f"⚠️ Bot needs admin rights in channel ID: {channel_id} to check membership")
                 return False
             else:
                 logger.error(f"BadRequest checking membership: {e}")
                 return False
         except Forbidden:
-            logger.info(f"User {user_id} has blocked the bot or bot was removed from channel")
+            logger.info(f"User {user_id} has blocked the bot")
             return False
             
     except Exception as e:
         logger.error(f"Unexpected error checking channel membership: {e}")
-        # In case of error, allow the user to proceed
-        return True
+        return False
 
 async def send_admin_alert(context: ContextTypes.DEFAULT_TYPE, message: str):
     """Send alert to admin"""
@@ -141,26 +199,34 @@ async def send_admin_alert(context: ContextTypes.DEFAULT_TYPE, message: str):
         logger.error(f"Failed to send admin alert: {e}")
 
 async def send_channel_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str = None) -> None:
-    """Send message asking user to join channel with proper URL"""
-    if not SUPPORT_CHANNEL or SUPPORT_CHANNEL == "@YourSupportChannel":
+    """Send message asking user to join channel with generated invite link"""
+    if not SUPPORT_CHANNEL_ID:
         # If channel not configured, just allow
         return
     
-    # Clean channel name
-    channel = SUPPORT_CHANNEL.replace("@", "").strip()
+    # Get channel info and generate invite link
+    channel = await get_channel_info(context)
+    
+    if not channel["invite_link"]:
+        await update.message.reply_text(
+            "⚠️ **Channel Verification Required**\n\n"
+            "Please contact the admin to get the channel invite link.",
+            parse_mode="Markdown"
+        )
+        return
     
     # Create callback data
     callback_data = f"check_{action}" if action else "check_membership"
     
     keyboard = [
-        [InlineKeyboardButton("✅ Join Support Channel", url=f"https://t.me/{channel}")],
+        [InlineKeyboardButton("✅ Join Support Channel", url=channel["invite_link"])],
         [InlineKeyboardButton("🔁 I've Joined - Check Now", callback_data=callback_data)]
     ]
     
     message_text = (
         f"📢 **Channel Verification Required**\n\n"
         f"To use this bot, you must join our support channel first:\n"
-        f"👉 @{channel}\n\n"
+        f"👉 **{channel['title']}**\n\n"
         f"**Instructions:**\n"
         f"1. Click 'Join Support Channel' button above\n"
         f"2. Join the channel\n"
@@ -295,15 +361,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
         else:
             # Still not a member
-            channel = SUPPORT_CHANNEL.replace("@", "").strip()
+            channel = await get_channel_info(context)
             keyboard = [
-                [InlineKeyboardButton("✅ Join Support Channel", url=f"https://t.me/{channel}")],
+                [InlineKeyboardButton("✅ Join Support Channel", url=channel["invite_link"])],
                 [InlineKeyboardButton("🔁 I've Joined - Check Now", callback_data=query.data)]
             ]
             
             await query.edit_message_text(
                 "❌ **You're still not a member!**\n\n"
-                f"Please join @{channel} first, then click 'I've Joined - Check Now'.\n\n"
+                f"Please join **{channel['title']}** first, then click 'I've Joined - Check Now'.\n\n"
                 f"Make sure you've actually joined the channel.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
@@ -345,6 +411,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
+    
+    elif query.data.startswith("users_"):
+        # Handle users pagination
+        page = int(query.data[6:])
+        await handle_users_pagination(query, context, page)
 
 async def handle_verification_start_from_callback(query, context, user_id: int, encoded: str) -> None:
     """Start verification from callback"""
@@ -699,6 +770,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ This command is only for administrators.")
         return
     
+    # Get channel info
+    channel = await get_channel_info(context)
+    
     # Get statistics
     total_users = users_collection.count_documents({})
     total_links = links_collection.count_documents({})
@@ -718,7 +792,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"🔐 **CAPTCHAs:**\n"
         f"• Pending CAPTCHAs: {total_captchas}\n\n"
         f"📢 **Channel:**\n"
-        f"• Support Channel: {SUPPORT_CHANNEL}"
+        f"• Title: {channel['title']}\n"
+        f"• ID: `{channel['id'] or SUPPORT_CHANNEL_ID}`\n"
+        f"• Invite Link: {channel['invite_link'] or 'Not available'}"
     )
     
     await update.message.reply_text(stats_text, parse_mode="Markdown")
@@ -739,6 +815,10 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except:
             pass
     
+    await handle_users_pagination(update, context, page)
+
+async def handle_users_pagination(update, context, page: int = 1):
+    """Handle users pagination for both command and callback"""
     page_size = 10
     skip = (page - 1) * page_size
     
@@ -752,7 +832,10 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     total_pages = (total_users + page_size - 1) // page_size
     
     if not users_list:
-        await update.message.reply_text("No users found.")
+        if hasattr(update, 'message'):
+            await update.message.reply_text("No users found.")
+        else:
+            await update.edit_message_text("No users found.")
         return
     
     users_text = "👥 **Users List**\n\n"
@@ -782,11 +865,18 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
-    await update.message.reply_text(
-        users_text,
-        parse_mode="Markdown",
-        reply_markup=reply_markup
-    )
+    if hasattr(update, 'message'):
+        await update.message.reply_text(
+            users_text,
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    else:
+        await update.edit_message_text(
+            users_text,
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
 
 async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Health check command"""
@@ -800,6 +890,9 @@ async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Get bot info
     bot_info = await context.bot.get_me()
     
+    # Get channel info
+    channel = await get_channel_info(context)
+    
     status_text = (
         f"🤖 **Bot Status**\n\n"
         f"• Bot: @{bot_info.username}\n"
@@ -807,7 +900,7 @@ async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Users: {users_collection.count_documents({})}\n"
         f"• Links: {links_collection.count_documents({})}\n"
         f"• Pending CAPTCHAs: {captcha_collection.count_documents({})}\n"
-        f"• Support Channel: {SUPPORT_CHANNEL}\n\n"
+        f"• Support Channel: {channel['title']} (ID: {channel['id'] or SUPPORT_CHANNEL_ID})\n\n"
         f"🕒 Server Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )
     
@@ -842,19 +935,28 @@ async def lifespan(app: FastAPI):
         drop_pending_updates=True
     )
     
-    # Log channel info
-    if SUPPORT_CHANNEL and SUPPORT_CHANNEL != "@YourSupportChannel":
-        logger.info(f"Support Channel configured: {SUPPORT_CHANNEL}")
+    # Initialize channel info
+    try:
+        await get_channel_info(ContextTypes.DEFAULT_TYPE())
+        logger.info(f"Channel info initialized: {channel_info['title']}")
+        
         # Send admin alert about channel verification
-        try:
+        await ptb_app.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=f"🤖 Bot started with channel verification enabled.\n\n"
+                 f"Channel: {channel_info['title']}\n"
+                 f"ID: {channel_info['id']}\n"
+                 f"Invite Link: {channel_info.get('invite_link', 'Not available')}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize channel info: {e}")
+        if SUPPORT_CHANNEL_ID:
             await ptb_app.bot.send_message(
                 chat_id=ADMIN_USER_ID,
-                text=f"🤖 Bot started with channel verification enabled.\n\nSupport Channel: {SUPPORT_CHANNEL}"
+                text=f"⚠️ Bot started but failed to initialize channel info.\n\n"
+                     f"Channel ID: {SUPPORT_CHANNEL_ID}\n"
+                     f"Error: {str(e)[:100]}..."
             )
-        except:
-            pass
-    else:
-        logger.warning("SUPPORT_CHANNEL not configured properly!")
     
     logger.info(f"Webhook set to: {webhook_url}")
     
@@ -888,7 +990,7 @@ async def process_update(request: Request):
 
 @app.get("/")
 async def root():
-    channel_status = "Not configured" if not SUPPORT_CHANNEL or SUPPORT_CHANNEL == "@YourSupportChannel" else SUPPORT_CHANNEL
+    channel_status = f"ID: {SUPPORT_CHANNEL_ID}" if SUPPORT_CHANNEL_ID else "Not configured"
     return {
         "status": "Telegram Bot is running",
         "timestamp": datetime.utcnow().isoformat(),
@@ -899,7 +1001,7 @@ async def root():
 async def health_check():
     return {
         "status": "ok",
-        "support_channel": SUPPORT_CHANNEL if SUPPORT_CHANNEL else "Not configured"
+        "support_channel_id": SUPPORT_CHANNEL_ID if SUPPORT_CHANNEL_ID else "Not configured"
     }
 
 if __name__ == "__main__":
