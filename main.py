@@ -140,22 +140,6 @@ async def send_admin_alert(context: ContextTypes.DEFAULT_TYPE, message: str):
     except Exception as e:
         logger.error(f"Failed to send admin alert: {e}")
 
-async def require_channel_membership(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str = "use_bot") -> bool:
-    """Check and enforce channel membership. Returns True if user is member."""
-    user = update.effective_user
-    
-    # Always allow admin
-    if str(user.id) == ADMIN_USER_ID:
-        return True
-    
-    is_member = await is_user_in_channel(user.id, context)
-    
-    if not is_member:
-        await send_channel_verification(update, context, action)
-        return False
-    
-    return True
-
 async def send_channel_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str = None) -> None:
     """Send message asking user to join channel with proper URL"""
     if not SUPPORT_CHANNEL or SUPPORT_CHANNEL == "@YourSupportChannel":
@@ -500,7 +484,346 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             else:
                 await update.message.reply_text("❌ Incorrect code. Please try again.")
 
-# [Rest of the code remains same - broadcast, stats, users, health functions]
+# ================== ADMIN COMMANDS ==================
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin broadcast command"""
+    user = update.effective_user
+    
+    if str(user.id) != ADMIN_USER_ID:
+        await update.message.reply_text("❌ This command is only for administrators.")
+        return
+    
+    if update.message.reply_to_message:
+        await broadcast_replied(update, context)
+    elif context.args:
+        await broadcast_text(update, context)
+    else:
+        await update.message.reply_text(
+            "📢 **Broadcast Usage:**\n\n"
+            "1. **Text Broadcast:** `/broadcast Your message here`\n"
+            "2. **Media Broadcast:** Reply to any message with `/broadcast`\n\n"
+            "**Supported Media Types:**\n"
+            "• Photos\n• Videos\n• Documents\n• Audio\n• Voice\n• Stickers\n• GIFs\n• Polls",
+            parse_mode="Markdown"
+        )
+
+async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast text message to all users"""
+    user = update.effective_user
+    message_text = ' '.join(context.args)
+    
+    # Get all users
+    all_users = list(users_collection.find({}, {"user_id": 1}))
+    total_users = len(all_users)
+    
+    if total_users == 0:
+        await update.message.reply_text("❌ No users found to broadcast to.")
+        return
+    
+    # Send initial status
+    status_msg = await update.message.reply_text(f"📢 Broadcasting to {total_users} users...\n🔄 Sent: 0/{total_users}")
+    
+    success_count = 0
+    failed_count = 0
+    
+    for user_data in all_users:
+        user_id = user_data["user_id"]
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            success_count += 1
+            
+            # Update status every 10 messages
+            if (success_count + failed_count) % 10 == 0:
+                try:
+                    await status_msg.edit_text(
+                        f"📢 Broadcasting to {total_users} users...\n"
+                        f"🔄 Sent: {success_count + failed_count}/{total_users}\n"
+                        f"✅ Success: {success_count}\n"
+                        f"❌ Failed: {failed_count}"
+                    )
+                except:
+                    pass
+            
+            # Small delay to avoid rate limits
+            await asyncio.sleep(0.1)
+            
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Failed to send to user {user_id}: {e}")
+            
+            # Remove user if they blocked the bot
+            if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
+                users_collection.delete_one({"user_id": user_id})
+    
+    # Final status update
+    final_text = (
+        f"✅ **Broadcast Completed!**\n\n"
+        f"📊 **Statistics:**\n"
+        f"• Total Users: {total_users}\n"
+        f"• ✅ Success: {success_count}\n"
+        f"• ❌ Failed: {failed_count}\n"
+        f"• 📈 Success Rate: {(success_count/total_users*100):.1f}%"
+    )
+    
+    await status_msg.edit_text(final_text, parse_mode="Markdown")
+
+async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast a replied message (supports all media types)"""
+    user = update.effective_user
+    replied_message = update.message.reply_to_message
+    
+    # Get all users
+    all_users = list(users_collection.find({}, {"user_id": 1}))
+    total_users = len(all_users)
+    
+    if total_users == 0:
+        await update.message.reply_text("❌ No users found to broadcast to.")
+        return
+    
+    # Send initial status
+    status_msg = await update.message.reply_text(f"📢 Broadcasting media to {total_users} users...\n🔄 Sent: 0/{total_users}")
+    
+    success_count = 0
+    failed_count = 0
+    
+    for user_data in all_users:
+        user_id = user_data["user_id"]
+        
+        try:
+            # Forward the message based on its type
+            if replied_message.text:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=replied_message.text,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.parse_mode == "Markdown" else None
+                )
+            elif replied_message.photo:
+                await context.bot.send_photo(
+                    chat_id=user_id,
+                    photo=replied_message.photo[-1].file_id,
+                    caption=replied_message.caption,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.caption_entities else None
+                )
+            elif replied_message.video:
+                await context.bot.send_video(
+                    chat_id=user_id,
+                    video=replied_message.video.file_id,
+                    caption=replied_message.caption,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.caption_entities else None
+                )
+            elif replied_message.document:
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=replied_message.document.file_id,
+                    caption=replied_message.caption,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.caption_entities else None
+                )
+            elif replied_message.audio:
+                await context.bot.send_audio(
+                    chat_id=user_id,
+                    audio=replied_message.audio.file_id,
+                    caption=replied_message.caption,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.caption_entities else None
+                )
+            elif replied_message.voice:
+                await context.bot.send_voice(
+                    chat_id=user_id,
+                    voice=replied_message.voice.file_id
+                )
+            elif replied_message.sticker:
+                await context.bot.send_sticker(
+                    chat_id=user_id,
+                    sticker=replied_message.sticker.file_id
+                )
+            elif replied_message.animation:  # GIFs
+                await context.bot.send_animation(
+                    chat_id=user_id,
+                    animation=replied_message.animation.file_id,
+                    caption=replied_message.caption,
+                    parse_mode=ParseMode.MARKDOWN if replied_message.caption_entities else None
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="📨 You received a broadcast message"
+                )
+            
+            success_count += 1
+            
+            # Update status every 10 messages
+            if (success_count + failed_count) % 10 == 0:
+                try:
+                    await status_msg.edit_text(
+                        f"📢 Broadcasting to {total_users} users...\n"
+                        f"🔄 Sent: {success_count + failed_count}/{total_users}\n"
+                        f"✅ Success: {success_count}\n"
+                        f"❌ Failed: {failed_count}"
+                    )
+                except:
+                    pass
+            
+            # Small delay to avoid rate limits
+            await asyncio.sleep(0.1)
+            
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Failed to send to user {user_id}: {e}")
+            
+            # Remove user if they blocked the bot
+            if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
+                users_collection.delete_one({"user_id": user_id})
+    
+    # Final status update
+    final_text = (
+        f"✅ **Broadcast Completed!**\n\n"
+        f"📊 **Statistics:**\n"
+        f"• Total Users: {total_users}\n"
+        f"• ✅ Success: {success_count}\n"
+        f"• ❌ Failed: {failed_count}\n"
+        f"• 📈 Success Rate: {(success_count/total_users*100):.1f}%"
+    )
+    
+    await status_msg.edit_text(final_text, parse_mode="Markdown")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show bot statistics - Admin only"""
+    user = update.effective_user
+    
+    if str(user.id) != ADMIN_USER_ID:
+        await update.message.reply_text("❌ This command is only for administrators.")
+        return
+    
+    # Get statistics
+    total_users = users_collection.count_documents({})
+    total_links = links_collection.count_documents({})
+    total_captchas = captcha_collection.count_documents({})
+    
+    # Get today's stats
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_users = users_collection.count_documents({"last_active": {"$gte": today}})
+    
+    stats_text = (
+        f"📊 **Bot Statistics**\n\n"
+        f"👥 **Users:**\n"
+        f"• Total Users: {total_users}\n"
+        f"• Active Today: {today_users}\n\n"
+        f"🔗 **Links:**\n"
+        f"• Total Protected Links: {total_links}\n\n"
+        f"🔐 **CAPTCHAs:**\n"
+        f"• Pending CAPTCHAs: {total_captchas}\n\n"
+        f"📢 **Channel:**\n"
+        f"• Support Channel: {SUPPORT_CHANNEL}"
+    )
+    
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
+
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all users with pagination - Admin only"""
+    user = update.effective_user
+    
+    if str(user.id) != ADMIN_USER_ID:
+        await update.message.reply_text("❌ This command is only for administrators.")
+        return
+    
+    # Parse page number from args
+    page = 1
+    if context.args:
+        try:
+            page = int(context.args[0])
+        except:
+            pass
+    
+    page_size = 10
+    skip = (page - 1) * page_size
+    
+    # Get users for this page
+    users_list = list(users_collection.find(
+        {},
+        {"user_id": 1, "username": 1, "first_name": 1, "last_active": 1}
+    ).sort("last_active", -1).skip(skip).limit(page_size))
+    
+    total_users = users_collection.count_documents({})
+    total_pages = (total_users + page_size - 1) // page_size
+    
+    if not users_list:
+        await update.message.reply_text("No users found.")
+        return
+    
+    users_text = "👥 **Users List**\n\n"
+    for i, u in enumerate(users_list):
+        username = f"@{u.get('username')}" if u.get('username') else "No username"
+        last_active = u.get('last_active', datetime.utcnow())
+        days_ago = (datetime.utcnow() - last_active).days
+        
+        users_text += (
+            f"{skip + i + 1}. {u.get('first_name', 'User')}\n"
+            f"   👤 {username}\n"
+            f"   🆔 ID: `{u.get('user_id')}`\n"
+            f"   ⏰ Active: {days_ago} days ago\n\n"
+        )
+    
+    users_text += f"📄 Page {page}/{total_pages} • Total Users: {total_users}"
+    
+    # Create pagination buttons
+    keyboard = []
+    if page > 1:
+        keyboard.append([InlineKeyboardButton("⬅️ Previous", callback_data=f"users_{page-1}")])
+    if page < total_pages:
+        if keyboard:
+            keyboard[0].append(InlineKeyboardButton("Next ➡️", callback_data=f"users_{page+1}"))
+        else:
+            keyboard.append([InlineKeyboardButton("Next ➡️", callback_data=f"users_{page+1}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+    
+    await update.message.reply_text(
+        users_text,
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Health check command"""
+    try:
+        # Check MongoDB connection
+        client.admin.command('ping')
+        mongo_status = "✅ Connected"
+    except Exception as e:
+        mongo_status = f"❌ Error: {e}"
+    
+    # Get bot info
+    bot_info = await context.bot.get_me()
+    
+    status_text = (
+        f"🤖 **Bot Status**\n\n"
+        f"• Bot: @{bot_info.username}\n"
+        f"• MongoDB: {mongo_status}\n"
+        f"• Users: {users_collection.count_documents({})}\n"
+        f"• Links: {links_collection.count_documents({})}\n"
+        f"• Pending CAPTCHAs: {captcha_collection.count_documents({})}\n"
+        f"• Support Channel: {SUPPORT_CHANNEL}\n\n"
+        f"🕒 Server Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+    
+    await update.message.reply_text(status_text, parse_mode="Markdown")
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors"""
+    logger.error(f"Update {update} caused error: {context.error}")
+    
+    if update and update.effective_chat:
+        try:
+            await update.effective_chat.send_message(
+                "❌ An error occurred. Please try again later."
+            )
+        except Exception:
+            pass
 
 # ================== FASTAPI SETUP ==================
 
