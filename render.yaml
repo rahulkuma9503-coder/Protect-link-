@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: telegram-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URL
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          name: telegram-bot
+          type: web
+          property: url
+      - key: ADMIN_USER_ID
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /
+    autoDeploy: true
