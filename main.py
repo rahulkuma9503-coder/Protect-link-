@@ -295,23 +295,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
     
     if not args:
-        welcome_msg = "👋 Welcome! Use /protect <group_link> to create a protected link."
+        # FIXED: Use proper HTML escaping for the command syntax
+        welcome_msg = "👋 <b>Welcome!</b> Use <code>/protect &lt;group_link&gt;</code> to create a protected link."
         if str(user.id) == ADMIN_USER_ID:
-            welcome_msg += "\n\n👑 Admin commands available: /broadcast, /stats, /users, /health"
+            welcome_msg += "\n\n👑 <b>Admin commands available:</b> /broadcast, /stats, /users, /health"
         await update.message.reply_text(welcome_msg, parse_mode="HTML")
         return
-    
-    if args[0].startswith("verify_"):
-        encoded = args[0][7:]
-        
-        if str(user.id) != ADMIN_USER_ID:
-            is_member = await is_user_in_channel(user.id, context)
-            if not is_member:
-                await send_channel_verification(update, context, f"verify_{encoded}")
-                return
-        
-        await handle_verification_start(update, context, user.id, encoded)
-
 async def handle_verification_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, encoded: str) -> None:
     """Start verification process for user - GENERATES NEW CAPTCHA EACH TIME"""
     link_data = links_collection.find_one({"encoded": encoded})
