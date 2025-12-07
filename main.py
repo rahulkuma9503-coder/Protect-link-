@@ -10,9 +10,10 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.templating import Jinja2Templates
 
 # --- Telegram Imports ---
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, ChatMember
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, ChatMember, ChatInviteLink
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
+from telegram.error import BadRequest, TelegramError
 
 # Enable logging
 logging.basicConfig(
@@ -32,6 +33,7 @@ db = client[db_name]
 links_collection = db["protected_links"]
 users_collection = db["users"]
 broadcast_collection = db["broadcast_history"]
+channels_collection = db["channels"]
 
 def init_db():
     """Verifies the MongoDB connection."""
@@ -43,10 +45,86 @@ def init_db():
         users_collection.create_index("user_id", unique=True)
         links_collection.create_index("created_by")
         links_collection.create_index("active")
+        channels_collection.create_index("channel_id", unique=True)
         logger.info("✅ Database indexes created")
     except Exception as e:
         logger.error(f"❌ MongoDB error: {e}")
         raise
+
+async def get_channel_invite_link(context: ContextTypes.DEFAULT_TYPE, channel_id: str) -> str:
+    """Get or create an invite link for a channel."""
+    try:
+        # Try to get from database first
+        channel_data = channels_collection.find_one({"channel_id": channel_id})
+        if channel_data and channel_data.get("invite_link"):
+            # Check if link is still valid (created within last 24 hours)
+            if channel_data.get("created_at") and \
+               (datetime.datetime.now() - channel_data["created_at"]).days < 1:
+                return channel_data["invite_link"]
+        
+        # Convert channel_id to appropriate format
+        try:
+            chat_id = int(channel_id)
+        except ValueError:
+            if channel_id.startswith('@'):
+                chat_id = channel_id
+            else:
+                chat_id = f"@{channel_id}"
+        
+        # Try to create a new invite link
+        try:
+            invite_link = await context.bot.create_chat_invite_link(
+                chat_id=chat_id,
+                creates_join_request=True,
+                name="Bot Access Link",
+                expire_date=None,
+                member_limit=None
+            )
+            invite_url = invite_link.invite_link
+            
+            # Save to database
+            channels_collection.update_one(
+                {"channel_id": channel_id},
+                {"$set": {
+                    "invite_link": invite_url,
+                    "created_at": datetime.datetime.now(),
+                    "last_updated": datetime.datetime.now()
+                }},
+                upsert=True
+            )
+            
+            logger.info(f"✅ Created new invite link for channel {channel_id}")
+            return invite_url
+            
+        except BadRequest as e:
+            logger.warning(f"⚠️ Cannot create invite link (admin rights?): {e}")
+            # Fallback: Try to get existing invite link
+            try:
+                chat = await context.bot.get_chat(chat_id)
+                if chat.invite_link:
+                    return chat.invite_link
+                elif chat.username:
+                    return f"https://t.me/{chat.username}"
+            except Exception as e2:
+                logger.error(f"❌ Failed to get chat info: {e2}")
+                
+            # If all fails, use t.me format
+            if channel_id.startswith('-100'):
+                return f"https://t.me/c/{channel_id[4:]}"
+            elif channel_id.startswith('@'):
+                return f"https://t.me/{channel_id[1:]}"
+            else:
+                return f"https://t.me/{channel_id}"
+                
+    except Exception as e:
+        logger.error(f"❌ Error getting channel invite link: {e}")
+        # Final fallback
+        if channel_id.startswith('-100'):
+            return f"https://t.me/c/{channel_id[4:]}"
+        elif channel_id.startswith('@'):
+            return f"https://t.me/{channel_id[1:]}"
+        else:
+            return f"https://t.me/{channel_id}"
 
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user is member of the support channel."""
@@ -68,24 +146,6 @@ async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logger.error(f"❌ Channel check error: {e}")
         return False
-
-async def require_channel_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check and enforce channel membership."""
-    user_id = update.effective_user.id
-    
-    # Store user
-    users_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "username": update.effective_user.username,
-            "first_name": update.effective_user.first_name,
-            "last_active": datetime.datetime.now()
-        }},
-        upsert=True
-    )
-    
-    # Check membership
-    return await check_channel_membership(user_id, context)
 
 # --- Telegram Bot Logic ---
 telegram_bot_app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
@@ -129,13 +189,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await check_channel_membership(user_id, context):
         support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
         if support_channel:
-            # Create simple invite link
-            if support_channel.startswith('-100'):
-                invite_link = f"https://t.me/c/{support_channel[4:]}"
-            elif support_channel.startswith('@'):
-                invite_link = f"https://t.me/{support_channel[1:]}"
-            else:
-                invite_link = f"https://t.me/{support_channel}"
+            # Get channel invite link
+            invite_link = await get_channel_invite_link(context, support_channel)
             
             keyboard = [
                 [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
@@ -152,7 +207,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # User is in channel or no channel required - show beautiful welcome message
     user_name = update.effective_user.first_name or "User"
-    username = update.effective_user.username
     
     # Create the beautiful welcome message
     welcome_msg = """╔──────── ✧ ────────╗
@@ -178,13 +232,7 @@ I help you keep your channel links safe & secure.
     
     support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
     if support_channel:
-        if support_channel.startswith('-100'):
-            invite_link = f"https://t.me/c/{support_channel[4:]}"
-        elif support_channel.startswith('@'):
-            invite_link = f"https://t.me/{support_channel[1:]}"
-        else:
-            invite_link = f"https://t.me/{support_channel}"
-        
+        invite_link = await get_channel_invite_link(context, support_channel)
         keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
     
     keyboard.append([InlineKeyboardButton("🚀 Create Protected Link", callback_data="create_link")])
@@ -227,18 +275,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await handle_revoke_link(update, context, link_id)
 
 async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Create protected link."""
+    """Create protected link for ANY Telegram link (group or channel)."""
     # Check channel membership
-    if not await require_channel_membership(update, context):
+    if not await check_channel_membership(update.effective_user.id, context):
         support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
         if support_channel:
-            if support_channel.startswith('-100'):
-                invite_link = f"https://t.me/c/{support_channel[4:]}"
-            elif support_channel.startswith('@'):
-                invite_link = f"https://t.me/{support_channel[1:]}"
-            else:
-                invite_link = f"https://t.me/{support_channel}"
-            
+            invite_link = await get_channel_invite_link(context, support_channel)
             keyboard = [
                 [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
                 [InlineKeyboardButton("✅ Check", callback_data="check_join")]
@@ -254,12 +296,22 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if not context.args or not context.args[0].startswith("https://t.me/"):
         await update.message.reply_text(
-            "Usage: `/protect https://t.me/yourchannel`",
+            "Usage: `/protect https://t.me/yourchannel`\n\n"
+            "This works for:\n"
+            "• Channels (public/private)\n"
+            "• Groups (public/private)\n"
+            "• Supergroups",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
-    group_link = context.args[0]
+    telegram_link = context.args[0]
+    
+    # Validate the link (basic check)
+    if not telegram_link.startswith("https://t.me/"):
+        await update.message.reply_text("❌ Invalid link. Must start with https://t.me/")
+        return
+    
     unique_id = str(uuid.uuid4())
     encoded_id = base64.urlsafe_b64encode(unique_id.encode()).decode().rstrip("=")
     
@@ -268,8 +320,10 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     links_collection.insert_one({
         "_id": encoded_id,
         "short_id": short_id,
-        "group_link": group_link,
+        "telegram_link": telegram_link,
+        "link_type": "channel" if "/c/" in telegram_link or "/s/" in telegram_link or telegram_link.count('/') == 1 else "group",
         "created_by": update.effective_user.id,
+        "created_by_name": update.effective_user.first_name,
         "created_at": datetime.datetime.now(),
         "active": True,
         "clicks": 0
@@ -292,8 +346,10 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"✅ *Protected Link Created!*\n\n"
         f"🔑 *Link ID:* `{short_id}`\n"
         f"📊 *Status:* 🟢 Active\n"
+        f"🔗 *Original Link:* `{telegram_link}`\n"
+        f"📝 *Type:* {'Channel' if 'channel' in telegram_link else 'Group'}\n"
         f"⏰ *Created:* {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-        f"🔗 *Your Protected Link:*\n"
+        f"🔐 *Your Protected Link:*\n"
         f"`{protected_link}`\n\n"
         f"📋 *Quick Actions:*\n"
         f"• Copy the link above\n"
@@ -306,16 +362,10 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Revoke a link."""
     # Check channel membership
-    if not await require_channel_membership(update, context):
+    if not await check_channel_membership(update.effective_user.id, context):
         support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
         if support_channel:
-            if support_channel.startswith('-100'):
-                invite_link = f"https://t.me/c/{support_channel[4:]}"
-            elif support_channel.startswith('@'):
-                invite_link = f"https://t.me/{support_channel[1:]}"
-            else:
-                invite_link = f"https://t.me/{support_channel}"
-            
+            invite_link = await get_channel_invite_link(context, support_channel)
             keyboard = [
                 [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
                 [InlineKeyboardButton("✅ Check", callback_data="check_join")]
@@ -589,13 +639,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not await check_channel_membership(user_id, context):
         support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
         if support_channel:
-            if support_channel.startswith('-100'):
-                invite_link = f"https://t.me/c/{support_channel[4:]}"
-            elif support_channel.startswith('@'):
-                invite_link = f"https://t.me/{support_channel[1:]}"
-            else:
-                invite_link = f"https://t.me/{support_channel}"
-            
+            invite_link = await get_channel_invite_link(context, support_channel)
             keyboard = [
                 [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
                 [InlineKeyboardButton("✅ Check", callback_data="check_join")]
@@ -609,34 +653,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         return
     
-    keyboard = [
-        [InlineKeyboardButton("🚀 Create Link", callback_data="create_link")],
-        [InlineKeyboardButton("📊 View Stats", callback_data="view_stats")]
-    ]
+    keyboard = []
     
     support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
     if support_channel:
-        if support_channel.startswith('-100'):
-            invite_link = f"https://t.me/c/{support_channel[4:]}"
-        elif support_channel.startswith('@'):
-            invite_link = f"https://t.me/{support_channel[1:]}"
-        else:
-            invite_link = f"https://t.me/{support_channel}"
-        
+        invite_link = await get_channel_invite_link(context, support_channel)
         keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
     await update.message.reply_text(
         "🛡️ *LinkShield Pro - Help Center*\n\n"
-        "✨ *Premium Features:*\n"
-        "• 🔐 Military-grade encryption\n"
-        "• 📊 Advanced analytics\n"
-        "• ⚡ Priority processing\n"
-        "• 🛡️ DDoS protection\n\n"
+        "✨ *What I Can Protect:*\n"
+        "• 🔗 Telegram Channels\n"
+        "• 👥 Telegram Groups\n"
+        "• 🛡️ Private/Public links\n"
+        "• 🔒 Supergroups\n\n"
         "📋 *Available Commands:*\n"
         "• `/start` - Start the bot\n"
-        "• `/protect <link>` - Create secure link\n"
+        "• `/protect https://t.me/channel` - Create secure link\n"
         "• `/revoke` - Revoke access\n"
         "• `/help` - This message\n\n"
         "🔒 *How to Use:*\n"
@@ -645,11 +680,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "3. Users join via verification\n"
         "4. Manage with `/revoke`\n\n"
         "💡 *Pro Tips:*\n"
-        "• Use descriptive channel names\n"
+        "• Works with any t.me link\n"
         "• Monitor link analytics\n"
         "• Revoke unused links\n"
-        "• Join our support channel\n\n"
-        "👇 *Quick actions:*",
+        "• Join our support channel",
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
@@ -702,6 +736,15 @@ async def on_startup():
     
     bot_info = await telegram_bot_app.bot.get_me()
     logger.info(f"Bot: @{bot_info.username}")
+    
+    # Test channel link generation
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    if support_channel:
+        try:
+            invite_link = await get_channel_invite_link(telegram_bot_app, support_channel)
+            logger.info(f"Support channel invite link: {invite_link}")
+        except Exception as e:
+            logger.error(f"Failed to generate channel link: {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -731,7 +774,7 @@ async def join_page(request: Request, token: str):
 
 @app.get("/getgrouplink/{token}")
 async def get_group_link(token: str):
-    """Get real group link."""
+    """Get real group/channel link."""
     link_data = links_collection.find_one({"_id": token, "active": True})
     
     if link_data:
@@ -739,7 +782,7 @@ async def get_group_link(token: str):
             {"_id": token},
             {"$inc": {"clicks": 1}}
         )
-        return {"url": link_data["group_link"]}
+        return {"url": link_data.get("telegram_link") or link_data.get("group_link")}
     else:
         raise HTTPException(status_code=404, detail="Link not found")
 
@@ -748,83 +791,7 @@ async def root():
     """Health check."""
     return {
         "status": "ok",
-        "service": "LinkShield",
+        "service": "LinkShield Pro",
+        "version": "2.0.0",
         "time": datetime.datetime.now().isoformat()
     }
-
-# --- FastAPI Setup ---
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-
-@app.on_event("startup")
-async def on_startup():
-    """Start bot."""
-    logger.info("Starting bot...")
-    
-    required_vars = ["TELEGRAM_TOKEN", "RENDER_EXTERNAL_URL"]
-    for var in required_vars:
-        if not os.environ.get(var):
-            logger.critical(f"Missing {var}")
-            raise Exception(f"Missing {var}")
-    
-    init_db()
-    
-    await telegram_bot_app.initialize()
-    await telegram_bot_app.start()
-    
-    webhook_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/{os.environ.get('TELEGRAM_TOKEN')}"
-    await telegram_bot_app.bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook: {webhook_url}")
-    
-    bot_info = await telegram_bot_app.bot.get_me()
-    logger.info(f"Bot: @{bot_info.username}")
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    """Stop bot."""
-    logger.info("Stopping bot...")
-    await telegram_bot_app.stop()
-    await telegram_bot_app.shutdown()
-    client.close()
-    logger.info("Bot stopped")
-
-@app.post("/{token}")
-async def telegram_webhook(request: Request, token: str):
-    """Telegram webhook."""
-    if token != os.environ.get("TELEGRAM_TOKEN"):
-        raise HTTPException(status_code=403, detail="Invalid token")
-    
-    update_data = await request.json()
-    update = Update.de_json(update_data, telegram_bot_app.bot)
-    await telegram_bot_app.process_update(update)
-    
-    return Response(status_code=200)
-
-@app.get("/join")
-async def join_page(request: Request, token: str):
-    """Web app page."""
-    return templates.TemplateResponse("join.html", {"request": request, "token": token})
-
-@app.get("/getgrouplink/{token}")
-async def get_group_link(token: str):
-    """Get real group link."""
-    link_data = links_collection.find_one({"_id": token, "active": True})
-    
-    if link_data:
-        links_collection.update_one(
-            {"_id": token},
-            {"$inc": {"clicks": 1}}
-        )
-        return {"url": link_data["group_link"]}
-    else:
-        raise HTTPException(status_code=404, detail="Link not found")
-
-@app.get("/")
-async def root():
-    """Health check."""
-    return {
-        "status": "ok",
-        "service": "LinkShield",
-        "time": datetime.datetime.now().isoformat()
-          }
-
