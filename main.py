@@ -751,3 +751,80 @@ async def root():
         "service": "LinkShield",
         "time": datetime.datetime.now().isoformat()
     }
+
+# --- FastAPI Setup ---
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+@app.on_event("startup")
+async def on_startup():
+    """Start bot."""
+    logger.info("Starting bot...")
+    
+    required_vars = ["TELEGRAM_TOKEN", "RENDER_EXTERNAL_URL"]
+    for var in required_vars:
+        if not os.environ.get(var):
+            logger.critical(f"Missing {var}")
+            raise Exception(f"Missing {var}")
+    
+    init_db()
+    
+    await telegram_bot_app.initialize()
+    await telegram_bot_app.start()
+    
+    webhook_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/{os.environ.get('TELEGRAM_TOKEN')}"
+    await telegram_bot_app.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook: {webhook_url}")
+    
+    bot_info = await telegram_bot_app.bot.get_me()
+    logger.info(f"Bot: @{bot_info.username}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Stop bot."""
+    logger.info("Stopping bot...")
+    await telegram_bot_app.stop()
+    await telegram_bot_app.shutdown()
+    client.close()
+    logger.info("Bot stopped")
+
+@app.post("/{token}")
+async def telegram_webhook(request: Request, token: str):
+    """Telegram webhook."""
+    if token != os.environ.get("TELEGRAM_TOKEN"):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    
+    update_data = await request.json()
+    update = Update.de_json(update_data, telegram_bot_app.bot)
+    await telegram_bot_app.process_update(update)
+    
+    return Response(status_code=200)
+
+@app.get("/join")
+async def join_page(request: Request, token: str):
+    """Web app page."""
+    return templates.TemplateResponse("join.html", {"request": request, "token": token})
+
+@app.get("/getgrouplink/{token}")
+async def get_group_link(token: str):
+    """Get real group link."""
+    link_data = links_collection.find_one({"_id": token, "active": True})
+    
+    if link_data:
+        links_collection.update_one(
+            {"_id": token},
+            {"$inc": {"clicks": 1}}
+        )
+        return {"url": link_data["group_link"]}
+    else:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+@app.get("/")
+async def root():
+    """Health check."""
+    return {
+        "status": "ok",
+        "service": "LinkShield",
+        "time": datetime.datetime.now().isoformat()
+          }
+
