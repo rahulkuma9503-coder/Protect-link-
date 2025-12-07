@@ -1,24 +1,20 @@
-FROM python:3.11-slim
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy the requirements file into the container
 COPY requirements.txt .
+
+# Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
-COPY main.py .
+# Copy the rest of the application code into the container
+COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
-USER botuser
+# Make the start script executable
+RUN chmod +x start.sh
 
-# Run the bot
-CMD ["python", "main.py"]
+# Command to run the application
+CMD ["./start.sh"]
