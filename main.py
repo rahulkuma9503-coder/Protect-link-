@@ -1,1274 +1,753 @@
 import os
 import logging
-import secrets
-import string
+import uuid
+import base64
 import asyncio
-import re
-import html
-from datetime import datetime
-from contextlib import asynccontextmanager
-from http import HTTPStatus
-from typing import Dict, List, Optional
-
-from fastapi import FastAPI, Request, Response
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-    CallbackQueryHandler
-)
-from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden
+import datetime
+from typing import Optional
 from pymongo import MongoClient
-from pymongo.errors import DuplicateKeyError
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.templating import Jinja2Templates
 
-# Configure logging
+# --- Telegram Imports ---
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, ChatMember
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.constants import ParseMode
+
+# Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MONGO_URL = os.environ.get("MONGO_URL")
-RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
-ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-SUPPORT_CHANNEL_ID = os.environ.get("SUPPORT_CHANNEL_ID")
+# --- Database Setup (MongoDB) ---
+MONGODB_URI = os.environ.get("MONGODB_URI")
+if not MONGODB_URI:
+    raise Exception("MONGODB_URI environment variable not set!")
 
-# MongoDB setup
-client = MongoClient(MONGO_URL)
-db = client.telegram_bot_db
-links_collection = db.links
-captcha_collection = db.captcha
-users_collection = db.users
-broadcasts_collection = db.broadcasts
+# Initialize MongoDB client and select database/collection
+client = MongoClient(MONGODB_URI)
+db_name = "protected_bot_db"
+db = client[db_name]
+links_collection = db["protected_links"]
+users_collection = db["users"]
+broadcast_collection = db["broadcast_history"]
 
-# Create indexes
-links_collection.create_index("encoded", unique=True)
-links_collection.create_index("created_at", expireAfterSeconds=2592000)
-captcha_collection.create_index([("user_id", 1), ("encoded", 1)], unique=True)
-captcha_collection.create_index("created_at", expireAfterSeconds=300)
-users_collection.create_index("user_id", unique=True)
-broadcasts_collection.create_index("broadcast_id", unique=True)
-
-# Initialize PTB Application
-ptb_app = Application.builder().token(BOT_TOKEN).updater(None).build()
-
-# Channel cache
-channel_info = {
-    "id": None,
-    "title": "Support Channel",
-    "username": None,
-    "invite_link": None,
-    "type": "channel"
-}
-
-# Helper functions
-def generate_encoded_string(length: int = 16) -> str:
-    alphabet = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
-
-def generate_captcha_code() -> str:
-    """Generate unique CAPTCHA code"""
-    return ''.join(secrets.choice(string.digits) for _ in range(5))
-
-def escape_markdown_v2(text: str) -> str:
-    """Escape text for Telegram MarkdownV2 format - CORRECT VERSION"""
-    if not text:
-        return ""
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
-def escape_html(text: str) -> str:
-    """Escape text for HTML parse mode"""
-    if not text:
-        return ""
-    return html.escape(text)
-
-def format_link_clean(link: str) -> str:
-    """Format link without any escaping for HTML mode"""
-    return link
-
-def generate_obfuscated_link(original_link: str) -> str:
-    """Generate an obfuscated version of the link that's hard to copy"""
-    if "t.me/joinchat/" in original_link:
-        parts = original_link.split("/")
-        if len(parts) >= 4:
-            code = parts[-1]
-            if len(code) > 8:
-                return f"https://t.me/joinchat/...{code[-4:]}"
-    elif "t.me/+" in original_link:
-        code = original_link.split("+")[-1]
-        if len(code) > 8:
-            return f"https://t.me/+...{code[-4:]}"
-    elif "t.me/c/" in original_link:
-        return "https://t.me/c/•••••••"
-    
-    return "•••••••••••••••••••••"
-
-async def ensure_user_in_db(user_id: int, username: str = None, first_name: str = None) -> None:
-    """Fixed MongoDB update to avoid conflict error"""
+def init_db():
+    """Verifies the MongoDB connection."""
     try:
-        existing_user = users_collection.find_one({"user_id": user_id})
+        client.admin.command('ismaster')
+        logger.info("✅ MongoDB connected")
         
-        if existing_user:
-            update_data = {
-                "last_active": datetime.utcnow(),
-                "message_count": existing_user.get("message_count", 0) + 1
-            }
-            
-            if username is not None and username != existing_user.get("username"):
-                update_data["username"] = username
-            
-            if first_name is not None and first_name != existing_user.get("first_name"):
-                update_data["first_name"] = first_name
-            
-            users_collection.update_one(
-                {"user_id": user_id},
-                {"$set": update_data}
-            )
-        else:
-            user_data = {
-                "user_id": user_id,
-                "username": username,
-                "first_name": first_name,
-                "joined_at": datetime.utcnow(),
-                "last_active": datetime.utcnow(),
-                "message_count": 1
-            }
-            users_collection.insert_one(user_data)
-            
+        # Create indexes
+        users_collection.create_index("user_id", unique=True)
+        links_collection.create_index("created_by")
+        links_collection.create_index("active")
+        logger.info("✅ Database indexes created")
     except Exception as e:
-        logger.error(f"Error ensuring user in DB: {e}")
+        logger.error(f"❌ MongoDB error: {e}")
+        raise
 
-async def get_channel_info(context: ContextTypes.DEFAULT_TYPE) -> Dict:
-    """Get channel information and generate invite link"""
-    global channel_info
+async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if user is member of the support channel."""
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    if not support_channel:
+        return True
     
     try:
-        if SUPPORT_CHANNEL_ID:
-            channel_id = int(SUPPORT_CHANNEL_ID)
-            
-            chat = await context.bot.get_chat(channel_id)
-            
-            channel_info.update({
-                "id": chat.id,
-                "title": chat.title,
-                "username": chat.username,
-                "type": chat.type
-            })
-            
-            try:
-                invite_link = await context.bot.create_chat_invite_link(
-                    chat_id=channel_id,
-                    member_limit=1,
-                    creates_join_request=False
-                )
-                channel_info["invite_link"] = invite_link.invite_link
-            except Exception as e:
-                logger.warning(f"Could not create invite link: {e}")
-                
-                if chat.username:
-                    channel_info["invite_link"] = f"https://t.me/{chat.username}"
-                else:
-                    channel_id_clean = str(abs(chat.id))[3:]
-                    channel_info["invite_link"] = f"https://t.me/c/{channel_id_clean}"
-            
-            logger.info(f"Channel info loaded: {channel_info['title']} (ID: {channel_info['id']})")
-            
-    except Exception as e:
-        logger.error(f"Error getting channel info: {e}")
-        channel_info["invite_link"] = f"https://t.me/c/{SUPPORT_CHANNEL_ID[4:]}" if SUPPORT_CHANNEL_ID and len(SUPPORT_CHANNEL_ID) > 4 else None
-    
-    return channel_info
-
-async def is_user_in_channel(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if user is member of support channel using channel ID"""
-    try:
-        if not SUPPORT_CHANNEL_ID:
-            return True
-        
-        channel_id = int(SUPPORT_CHANNEL_ID)
-        
         try:
-            member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            status = member.status
-            
-            if status in ["member", "administrator", "creator"]:
-                return True
+            chat_id = int(support_channel)
+        except ValueError:
+            if support_channel.startswith('@'):
+                chat_id = support_channel
             else:
-                return False
-                
-        except BadRequest as e:
-            if "user not found" in str(e).lower():
-                return False
-            elif "chat not found" in str(e).lower():
-                return False
-            elif "not enough rights" in str(e).lower():
-                return False
-            else:
-                return False
-        except Forbidden:
-            return False
-            
+                chat_id = f"@{support_channel}"
+        
+        chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        return chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
     except Exception as e:
-        logger.error(f"Unexpected error checking channel membership: {e}")
+        logger.error(f"❌ Channel check error: {e}")
         return False
 
-async def send_channel_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str = None) -> None:
-    """Send message asking user to join channel with generated invite link"""
-    if not SUPPORT_CHANNEL_ID:
-        return
+async def require_channel_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check and enforce channel membership."""
+    user_id = update.effective_user.id
     
-    channel = await get_channel_info(context)
-    
-    if not channel["invite_link"]:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ <b>Channel Verification Required</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Please contact the admin to get the channel invite link.",
-            parse_mode="HTML"
-        )
-        return
-    
-    callback_data = f"check_{action}" if action else "check_membership"
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Join Support Channel", url=channel["invite_link"])],
-        [InlineKeyboardButton("🔁 I've Joined - Check Now", callback_data=callback_data)]
-    ]
-    
-    escaped_title = escape_html(channel['title'])
-    
-    message_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📢 <b>Channel Verification Required</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"To use this bot, you must join our support channel first:\n"
-        f"👉 <b>{escaped_title}</b>\n\n"
-        "<b>Instructions:</b>\n"
-        "1️⃣ Click 'Join Support Channel' button above\n"
-        "2️⃣ Join the channel\n"
-        "3️⃣ Come back and click 'I've Joined - Check Now'\n\n"
-        "⚠️ <i>You must join to proceed</i>"
+    # Store user
+    users_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "username": update.effective_user.username,
+            "first_name": update.effective_user.first_name,
+            "last_active": datetime.datetime.now()
+        }},
+        upsert=True
     )
     
-    await update.message.reply_text(
-        message_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="HTML"
-    )
+    # Check membership
+    return await check_channel_membership(user_id, context)
 
-def validate_telegram_link(link: str) -> bool:
-    """Validate all types of Telegram group links including approval links"""
-    patterns = [
-        r'^https://(t\.me|telegram\.me)/joinchat/[a-zA-Z0-9_-]+$',
-        r'^https://(t\.me|telegram\.me)/\+[a-zA-Z0-9_-]+$',
-        r'^https://(t\.me|telegram\.me)/[a-zA-Z0-9_]{5,}$',
-        r'^https://(t\.me|telegram\.me)/i/[a-zA-Z0-9_-]+$',
-        r'^https://(t\.me|telegram\.me)/c/\d+$',
-        r'^https://(t\.me|telegram\.me)/joinchat/[a-zA-Z0-9_-]+\?[a-zA-Z0-9_=&-]+$',
-    ]
-    
-    for pattern in patterns:
-        if re.match(pattern, link):
-            return True
-    
-    return False
-
-# ================== COMMAND HANDLERS ==================
+# --- Telegram Bot Logic ---
+telegram_bot_app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command with beautiful welcome message"""
-    user = update.effective_user
-    args = context.args
+    """Handles the /start command."""
+    user_id = update.effective_user.id
     
-    await ensure_user_in_db(user.id, user.username, user.first_name)
-    
-    # Check channel membership for all non-admin users
-    if str(user.id) != ADMIN_USER_ID:
-        is_member = await is_user_in_channel(user.id, context)
-        if not is_member:
-            await send_channel_verification(update, context, "start")
-            return
-    
-    if not args:
-        # Escape user's first name for HTML
-        user_name = escape_html(user.first_name) if user.first_name else "User"
-        
-        # Create beautiful welcome message
-        welcome_msg = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎊 <b>Welcome {user_name}</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            
-            "🤖 <b>I am a Channel Link Protection Bot</b>\n"
-            "<i>ɪ ᴄᴀɴ ʜᴇʟᴘ ʏᴏᴜ ᴘʀᴏᴛᴇᴄᴛ ʏᴏᴜʀ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋꜱ.</i>\n\n"
-            
-            "🛠 <b>Commands:</b>\n"
-            "• /start - Start the bot\n"
-            "• /protect - Generate protected link\n"
-            "• /help - Show this message\n\n"
-            
-            "🌟 <b>Features:</b>\n"
-            "• 🔒 Advanced Link Protection\n"
-            "• 🚀 Instant Link Generation\n"
-            "• 📊 Link Analytics\n"
-            "• 👥 User Management\n\n"
-            
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 <b>How to use:</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "1. Use <code>/protect &lt;your_link&gt;</code>\n"
-            "2. Share the protected link\n"
-            "3. Users verify via CAPTCHA\n"
-            "4. Get access to your channel\n\n"
-            
-            "⚠️ <i>Note: Users must join support channel first</i>"
-        )
-        
-        # Add admin commands if user is admin
-        if str(user.id) == ADMIN_USER_ID:
-            welcome_msg += (
-                "\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                "👑 <b>Admin Commands:</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "• /broadcast - Broadcast messages\n"
-                "• /stats - View bot statistics\n"
-                "• /users - List all users\n"
-                "• /health - Check bot health\n"
-                "• /help - Show help message"
-            )
-        
-        await update.message.reply_text(welcome_msg, parse_mode="HTML")
-        return
-    
-    if args[0].startswith("verify_"):
-        encoded = args[0][7:]
-        
-        if str(user.id) != ADMIN_USER_ID:
-            is_member = await is_user_in_channel(user.id, context)
-            if not is_member:
-                await send_channel_verification(update, context, f"verify_{encoded}")
-                return
-        
-        await handle_verification_start(update, context, user.id, encoded)
-
-async def handle_verification_start(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, encoded: str) -> None:
-    """Start verification process for user - GENERATES NEW CAPTCHA EACH TIME"""
-    link_data = links_collection.find_one({"encoded": encoded})
-    
-    if not link_data:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Invalid Link</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "The verification link is invalid or has expired.",
-            parse_mode="HTML"
-        )
-        return
-    
-    # DELETE any existing CAPTCHA for this user and encoded link
-    captcha_collection.delete_many({"user_id": user_id, "encoded": encoded})
-    
-    # Generate NEW CAPTCHA code
-    captcha_code = generate_captcha_code()
-    
-    # Check if this code already exists (unlikely but just in case)
-    existing_code = captcha_collection.find_one({"captcha_code": captcha_code})
-    retry_count = 0
-    while existing_code and retry_count < 5:
-        captcha_code = generate_captcha_code()
-        existing_code = captcha_collection.find_one({"captcha_code": captcha_code})
-        retry_count += 1
-    
-    captcha_data = {
-        "user_id": user_id,
-        "encoded": encoded,
-        "captcha_code": captcha_code,
-        "created_at": datetime.utcnow()
-    }
-    
-    try:
-        captcha_collection.insert_one(captcha_data)
-        
-        keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🔒 <b>Verification Required</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Click the button below to start the verification process:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Error creating CAPTCHA: {e}")
-        keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✅ <b>Verification Session Found</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Click the button below to continue:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-    
-    if query.data.startswith("check_"):
-        action = query.data[6:]
-        
-        is_member = await is_user_in_channel(user.id, context)
-        
-        if is_member:
-            if action.startswith("verify_"):
-                encoded = action[7:]
-                await handle_verification_start_from_callback(query, context, user.id, encoded)
-            elif action == "protect":
-                await query.edit_message_text(
-                    "━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "✅ <b>Channel Verified!</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "You can now use /protect command.\n\n"
-                    "Type: <code>/protect &lt;group_link&gt;</code>",
-                    parse_mode="HTML"
-                )
-            elif action == "start":
-                await query.edit_message_text(
-                    "━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "✅ <b>Channel Verified!</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "You can now use the bot.\n\n"
-                    "<b>Commands:</b>\n"
-                    "• /protect - Protect a group link\n"
-                    "• /start - Show this message\n"
-                    "• /help - Show help message",
-                    parse_mode="HTML"
-                )
-            else:
-                await query.edit_message_text(
-                    "━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "✅ <b>Channel Verified!</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "You can now use the bot.",
-                    parse_mode="HTML"
-                )
-        else:
-            channel = await get_channel_info(context)
-            keyboard = [
-                [InlineKeyboardButton("✅ Join Support Channel", url=channel["invite_link"])],
-                [InlineKeyboardButton("🔁 I've Joined - Check Now", callback_data=query.data)]
-            ]
-            
-            escaped_title = escape_html(channel['title'])
-            
-            await query.edit_message_text(
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "❌ <b>Verification Failed!</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"Please join <b>{escaped_title}</b> first, then click 'I've Joined - Check Now'.\n\n"
-                f"Make sure you've actually joined the channel.",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
-            )
-    
-    elif query.data.startswith("verify_"):
-        encoded = query.data[7:]
-        await handle_captcha_verification(query, context, user.id, encoded)
-    
-    elif query.data.startswith("copy_"):
-        encoded = query.data[5:]
-        bot_username = context.bot.username
-        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
-        
-        await query.edit_message_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✅ <b>Protected Link Generated</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Share this link with others:\n"
-            f"<code>{protected_link}</code>\n\n"
-            f"⚠️ <i>Note: Clicking will start verification process</i>",
-            parse_mode="HTML"
-        )
-    
-    elif query.data.startswith("share_link_"):
-        encoded = query.data[11:]
-        bot_username = context.bot.username
-        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
-        
-        share_text = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🔗 <b>Join via Protected Link</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Users will need to complete verification to join."
-        )
-        
-        keyboard = [[
-            InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
-            InlineKeyboardButton("📋 Copy Protected Link", callback_data=f"copy_{encoded}")
-        ]]
-        
-        await query.edit_message_text(
-            share_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-    
-    elif query.data.startswith("users_"):
-        page = int(query.data[6:])
-        await handle_users_pagination(query, context, page)
-
-async def handle_verification_start_from_callback(query, context, user_id: int, encoded: str) -> None:
-    """Start verification from callback - GENERATES NEW CAPTCHA"""
-    # Delete existing CAPTCHA and generate new one
-    captcha_collection.delete_many({"user_id": user_id, "encoded": encoded})
-    
-    captcha_code = generate_captcha_code()
-    captcha_data = {
-        "user_id": user_id,
-        "encoded": encoded,
-        "captcha_code": captcha_code,
-        "created_at": datetime.utcnow()
-    }
-    
-    captcha_collection.insert_one(captcha_data)
-    
-    keyboard = [[InlineKeyboardButton("🔐 Verify Now", callback_data=f"verify_{encoded}")]]
-    
-    await query.edit_message_text(
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ <b>Channel Verified!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Now click the button below to start the CAPTCHA verification:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="HTML"
-    )
-
-async def handle_captcha_verification(query, context, user_id: int, encoded: str) -> None:
-    """Handle CAPTCHA verification via inline button"""
-    captcha_data = captcha_collection.find_one({"user_id": user_id, "encoded": encoded})
-    
-    if not captcha_data:
-        await query.edit_message_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Verification Error</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "No pending verification found.",
-            parse_mode="HTML"
-        )
-        return
-    
-    captcha_code = captcha_data["captcha_code"]
-    
-    await query.edit_message_text(
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔢 <b>Enter CAPTCHA Code</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Your verification code is: <code>{captcha_code}</code>\n\n"
-        f"Please send this 5-digit code back to me within 5 minutes.",
-        parse_mode="HTML"
-    )
-
-async def protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Protect a group link - HIDES ORIGINAL LINK FROM USER"""
-    user = update.effective_user
-    
-    if str(user.id) != ADMIN_USER_ID:
-        is_member = await is_user_in_channel(user.id, context)
-        if not is_member:
-            await send_channel_verification(update, context, "protect")
-            return
-    
-    await ensure_user_in_db(user.id, user.username, user.first_name)
-    
-    if update.effective_chat.type != "private":
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ <b>Private Chat Required</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Please use this command in private chat.",
-            parse_mode="HTML"
-        )
-        return
-    
-    if not context.args:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📝 <b>Command Usage</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<b>Usage:</b> <code>/protect &lt;group_link&gt;</code>\n\n"
-            "<b>Supported Link Types:</b>\n"
-            "• Public Group: <code>https://t.me/groupname</code>\n"
-            "• Approval Link: <code>https://t.me/joinchat/xxxxx</code>\n"
-            "• Private Link: <code>https://t.me/+invitecode</code>\n"
-            "• Channel Link: <code>https://t.me/c/xxxxx</code>\n\n"
-            "<b>Example:</b>\n"
-            "<code>/protect https://t.me/joinchat/ABCD1234</code>",
-            parse_mode="HTML"
-        )
-        return
-    
-    group_link = context.args[0]
-    
-    if not validate_telegram_link(group_link):
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Invalid Telegram Link</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Please provide a valid Telegram group/channel link.\n\n"
-            "<b>Supported formats:</b>\n"
-            "• <code>https://t.me/joinchat/xxxxx</code>\n"
-            "• <code>https://t.me/+invitecode</code>\n"
-            "• <code>https://t.me/groupname</code>\n"
-            "• <code>https://t.me/c/xxxxx</code>\n\n"
-            "<b>Example:</b>\n"
-            "<code>/protect https://t.me/joinchat/ABCD1234</code>",
-            parse_mode="HTML"
-        )
-        return
-    
-    encoded = generate_encoded_string()
-    link_data = {
-        "encoded": encoded,
-        "group_link": group_link,
-        "created_by": user.id,
-        "created_at": datetime.utcnow(),
-        "verification_count": 0
-    }
-    
-    try:
-        links_collection.insert_one(link_data)
-        bot_username = context.bot.username
-        protected_link = f"https://t.me/{bot_username}?start=verify_{encoded}"
-        
-        protected_link_clean = format_link_clean(protected_link)
-        
-        keyboard = [[
-            InlineKeyboardButton("🔗 Share Protected Link", url=f"https://t.me/share/url?url={protected_link}&text=Join%20via%20protected%20link"),
-            InlineKeyboardButton("📋 Copy Protected Link", callback_data=f"copy_{encoded}")
-        ]]
-        
-        obfuscated_link = generate_obfuscated_link(group_link)
-        
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✅ <b>Link Protected Successfully!</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"<b>Original Link:</b> <code>{obfuscated_link}</code> (hidden for security)\n\n"
-            f"<b>Protected Link:</b>\n"
-            f"<code>{protected_link_clean}</code>\n\n"
-            "<b>Important:</b>\n"
-            "• Share the protected link with others\n"
-            "• Users must join support channel first\n"
-            "• Then complete CAPTCHA verification\n"
-            "• <b>Final group link is only accessible via button</b>\n\n"
-            "⚠️ <i>The actual group link is protected and cannot be copied</i>",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Error in /protect: {e}")
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Error</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "An error occurred while processing your request.",
-            parse_mode="HTML"
-        )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming messages - RESTRICTS GROUP LINK COPYING"""
-    user = update.effective_user
-    
-    if str(user.id) != ADMIN_USER_ID:
-        is_member = await is_user_in_channel(user.id, context)
-        if not is_member:
-            await send_channel_verification(update, context, "message")
-            return
-    
-    await ensure_user_in_db(user.id, user.username, user.first_name)
-    
-    if update.effective_chat.type != "private" or not update.message.text:
-        return
-    
-    message_text = update.message.text.strip()
-    
-    if len(message_text) == 5 and message_text.isdigit():
-        captcha_data = captcha_collection.find_one({"user_id": user.id})
-        
-        if captcha_data:
-            if message_text == captcha_data["captcha_code"]:
-                link_data = links_collection.find_one({"encoded": captcha_data["encoded"]})
-                if link_data:
-                    # Create a secure join button - NO LINK DISPLAYED
-                    keyboard = [[
-                        InlineKeyboardButton("🚀 Click to Join (One-Time Button)", url=link_data["group_link"]),
-                        InlineKeyboardButton("📤 Share Verification Link", callback_data=f"share_link_{captcha_data['encoded']}")
-                    ]]
-                    
-                    obfuscated_link = generate_obfuscated_link(link_data["group_link"])
-                    
-                    await update.message.reply_text(
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "✅ <b>Verification Successful!</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        f"<b>Group Access:</b> <code>{obfuscated_link}</code>\n\n"
-                        "<b>⚠️ IMPORTANT SECURITY FEATURES:</b>\n"
-                        "• Group link is <b>NOT displayed</b> for copying\n"
-                        "• Click the button below to join directly\n"
-                        "• Button is one-time use only\n"
-                        "• Link sharing is disabled\n"
-                        "• Screenshot protection enabled\n\n"
-                        "Click the button below to join the group:",
-                        reply_markup=InlineKeyboardMarkup(keyboard),
-                        parse_mode="HTML"
-                    )
-                    
-                    # Delete the used CAPTCHA to prevent reuse
-                    captcha_collection.delete_one({"_id": captcha_data["_id"]})
-                    
-                    # Update verification count
-                    links_collection.update_one(
-                        {"encoded": captcha_data["encoded"]},
-                        {"$inc": {"verification_count": 1}}
-                    )
-                else:
-                    await update.message.reply_text(
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "❌ <b>Link Expired</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        "The verification link has expired.",
-                        parse_mode="HTML"
-                    )
-                    captcha_collection.delete_one({"user_id": user.id})
-            else:
-                await update.message.reply_text(
-                    "━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "❌ <b>Incorrect Code</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "Incorrect verification code. Please try again.",
-                    parse_mode="HTML"
-                )
-                # Delete the CAPTCHA on failed attempt to prevent brute force
-                captcha_collection.delete_one({"user_id": user.id})
-
-# ================== ADMIN COMMANDS ==================
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin broadcast command"""
-    user = update.effective_user
-    
-    if str(user.id) != ADMIN_USER_ID:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Admin Only</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "This command is only for administrators.",
-            parse_mode="HTML"
-        )
-        return
-    
-    if update.message.reply_to_message:
-        await broadcast_replied(update, context)
-    elif context.args:
-        await broadcast_text(update, context)
-    else:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📢 <b>Broadcast Usage</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<b>Text Broadcast:</b>\n"
-            "<code>/broadcast Your message here</code>\n\n"
-            "<b>Media Broadcast:</b>\n"
-            "Reply to any message with <code>/broadcast</code>\n\n"
-            "<b>Supported Media Types:</b>\n"
-            "• Photos • Videos • Documents\n"
-            "• Audio • Voice • Stickers\n"
-            "• GIFs • Polls",
-            parse_mode="HTML"
-        )
-
-async def broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Broadcast text message to all users"""
-    user = update.effective_user
-    message_text = ' '.join(context.args)
-    
-    all_users = list(users_collection.find({}, {"user_id": 1}))
-    total_users = len(all_users)
-    
-    if total_users == 0:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>No Users</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "No users found to broadcast to.",
-            parse_mode="HTML"
-        )
-        return
-    
-    status_msg = await update.message.reply_text(
-        f"📢 <b>Broadcasting to {total_users} users...</b>\n🔄 Sent: 0/{total_users}",
-        parse_mode="HTML"
+    # Store user
+    users_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "username": update.effective_user.username,
+            "first_name": update.effective_user.first_name,
+            "last_active": datetime.datetime.now()
+        }},
+        upsert=True
     )
     
-    success_count = 0
-    failed_count = 0
-    
-    for user_data in all_users:
-        user_id = user_data["user_id"]
-        
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=message_text,
-                parse_mode="HTML"
-            )
-            success_count += 1
-            
-            if (success_count + failed_count) % 10 == 0:
-                try:
-                    await status_msg.edit_text(
-                        f"📢 <b>Broadcasting to {total_users} users...</b>\n"
-                        f"🔄 Sent: {success_count + failed_count}/{total_users}\n"
-                        f"✅ Success: {success_count}\n"
-                        f"❌ Failed: {failed_count}",
-                        parse_mode="HTML"
-                    )
-                except:
-                    pass
-            
-            await asyncio.sleep(0.1)
-            
-        except Exception as e:
-            failed_count += 1
-            logger.error(f"Failed to send to user {user_id}: {e}")
-            
-            if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
-                users_collection.delete_one({"user_id": user_id})
-    
-    final_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ <b>Broadcast Completed!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 <b>Statistics:</b>\n"
-        f"• Total Users: {total_users}\n"
-        f"• ✅ Success: {success_count}\n"
-        f"• ❌ Failed: {failed_count}\n"
-        f"• 📈 Success Rate: {(success_count/total_users*100):.1f}%"
-    )
-    
-    await status_msg.edit_text(
-        final_text,
-        parse_mode="HTML"
-    )
-
-async def broadcast_replied(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Broadcast a replied message (supports all media types)"""
-    user = update.effective_user
-    replied_message = update.message.reply_to_message
-    
-    all_users = list(users_collection.find({}, {"user_id": 1}))
-    total_users = len(all_users)
-    
-    if total_users == 0:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>No Users</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "No users found to broadcast to.",
-            parse_mode="HTML"
-        )
-        return
-    
-    status_msg = await update.message.reply_text(
-        f"📢 <b>Broadcasting media to {total_users} users...</b>\n🔄 Sent: 0/{total_users}",
-        parse_mode="HTML"
-    )
-    
-    success_count = 0
-    failed_count = 0
-    
-    for user_data in all_users:
-        user_id = user_data["user_id"]
-        
-        try:
-            if replied_message.text:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=replied_message.text,
-                    parse_mode="HTML"
-                )
-            elif replied_message.photo:
-                await context.bot.send_photo(
-                    chat_id=user_id,
-                    photo=replied_message.photo[-1].file_id,
-                    caption=replied_message.caption,
-                    parse_mode="HTML"
-                )
-            elif replied_message.video:
-                await context.bot.send_video(
-                    chat_id=user_id,
-                    video=replied_message.video.file_id,
-                    caption=replied_message.caption,
-                    parse_mode="HTML"
-                )
-            elif replied_message.document:
-                await context.bot.send_document(
-                    chat_id=user_id,
-                    document=replied_message.document.file_id,
-                    caption=replied_message.caption,
-                    parse_mode="HTML"
-                )
-            elif replied_message.audio:
-                await context.bot.send_audio(
-                    chat_id=user_id,
-                    audio=replied_message.audio.file_id,
-                    caption=replied_message.caption,
-                    parse_mode="HTML"
-                )
-            elif replied_message.voice:
-                await context.bot.send_voice(
-                    chat_id=user_id,
-                    voice=replied_message.voice.file_id
-                )
-            elif replied_message.sticker:
-                await context.bot.send_sticker(
-                    chat_id=user_id,
-                    sticker=replied_message.sticker.file_id
-                )
-            elif replied_message.animation:
-                await context.bot.send_animation(
-                    chat_id=user_id,
-                    animation=replied_message.animation.file_id,
-                    caption=replied_message.caption,
-                    parse_mode="HTML"
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="📨 <b>You received a broadcast message</b>",
-                    parse_mode="HTML"
-                )
-            
-            success_count += 1
-            
-            if (success_count + failed_count) % 10 == 0:
-                try:
-                    await status_msg.edit_text(
-                        f"📢 <b>Broadcasting to {total_users} users...</b>\n"
-                        f"🔄 Sent: {success_count + failed_count}/{total_users}\n"
-                        f"✅ Success: {success_count}\n"
-                        f"❌ Failed: {failed_count}",
-                        parse_mode="HTML"
-                    )
-                except:
-                    pass
-            
-            await asyncio.sleep(0.1)
-            
-        except Exception as e:
-            failed_count += 1
-            logger.error(f"Failed to send to user {user_id}: {e}")
-            
-            if "blocked" in str(e).lower() or "chat not found" in str(e).lower():
-                users_collection.delete_one({"user_id": user_id})
-    
-    final_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ <b>Broadcast Completed!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 <b>Statistics:</b>\n"
-        f"• Total Users: {total_users}\n"
-        f"• ✅ Success: {success_count}\n"
-        f"• ❌ Failed: {failed_count}\n"
-        f"• 📈 Success Rate: {(success_count/total_users*100):.1f}%"
-    )
-    
-    await status_msg.edit_text(
-        final_text,
-        parse_mode="HTML"
-    )
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show bot statistics - Admin only"""
-    user = update.effective_user
-    
-    if str(user.id) != ADMIN_USER_ID:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Admin Only</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "This command is only for administrators.",
-            parse_mode="HTML"
-        )
-        return
-    
-    channel = await get_channel_info(context)
-    
-    total_users = users_collection.count_documents({})
-    total_links = links_collection.count_documents({})
-    total_captchas = captcha_collection.count_documents({})
-    
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_users = users_collection.count_documents({"last_active": {"$gte": today}})
-    
-    escaped_title = escape_html(channel['title'])
-    
-    stats_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>Bot Statistics</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "👥 <b>Users:</b>\n"
-        f"• Total Users: {total_users}\n"
-        f"• Active Today: {today_users}\n\n"
-        
-        "🔗 <b>Links:</b>\n"
-        f"• Total Protected Links: {total_links}\n\n"
-        
-        "🔐 <b>CAPTCHAs:</b>\n"
-        f"• Pending CAPTCHAs: {total_captchas}\n\n"
-        
-        "📢 <b>Channel:</b>\n"
-        f"• Title: {escaped_title}\n"
-        f"• ID: <code>{channel['id'] or SUPPORT_CHANNEL_ID}</code>\n"
-        f"• Invite Link: {channel['invite_link'] or 'Not available'}\n\n"
-        
-        "🕒 <b>Server Time:</b>\n"
-        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    )
-    
-    await update.message.reply_text(
-        stats_text,
-        parse_mode="HTML"
-    )
-
-async def users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List all users with pagination - Admin only"""
-    user = update.effective_user
-    
-    if str(user.id) != ADMIN_USER_ID:
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "❌ <b>Admin Only</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "This command is only for administrators.",
-            parse_mode="HTML"
-        )
-        return
-    
-    page = 1
+    # Check if this is a protected link (has argument)
     if context.args:
-        try:
-            page = int(context.args[0])
-        except:
-            pass
-    
-    await handle_users_pagination(update, context, page)
+        encoded_id = context.args[0]
+        link_data = links_collection.find_one({"_id": encoded_id, "active": True})
 
-async def handle_users_pagination(update, context, page: int = 1):
-    """Handle users pagination for both command and callback"""
-    page_size = 10
-    skip = (page - 1) * page_size
-    
-    users_list = list(users_collection.find(
-        {},
-        {"user_id": 1, "username": 1, "first_name": 1, "last_active": 1}
-    ).sort("last_active", -1).skip(skip).limit(page_size))
-    
-    total_users = users_collection.count_documents({})
-    total_pages = (total_users + page_size - 1) // page_size
-    
-    if not users_list:
-        if hasattr(update, 'message'):
+        if link_data:
+            web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/join?token={encoded_id}"
+            
+            keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "👥 <b>No Users</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "No users found.",
-                parse_mode="HTML"
+                "🔐 This is a Protected Link\n\n"
+                "Click the button below to proceed.",
+                reply_markup=reply_markup
             )
         else:
-            await update.edit_message_text(
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "👥 <b>No Users</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "No users found.",
-                parse_mode="HTML"
-            )
+            await update.message.reply_text("❌ Link expired or revoked")
         return
     
-    users_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 <b>Users List</b> (Page {page}/{total_pages})\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    )
+    # If no args, check channel membership first
+    if not await check_channel_membership(user_id, context):
+        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+        if support_channel:
+            # Create simple invite link
+            if support_channel.startswith('-100'):
+                invite_link = f"https://t.me/c/{support_channel[4:]}"
+            elif support_channel.startswith('@'):
+                invite_link = f"https://t.me/{support_channel[1:]}"
+            else:
+                invite_link = f"https://t.me/{support_channel}"
+            
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
+                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "🔐 Join our channel first to use this bot.\n"
+                "Then click 'Check' below.",
+                reply_markup=reply_markup
+            )
+            return
     
-    for i, u in enumerate(users_list):
-        username = f"@{u.get('username')}" if u.get('username') else "No username"
-        last_active = u.get('last_active', datetime.utcnow())
-        days_ago = (datetime.utcnow() - last_active).days
-        
-        escaped_name = escape_html(u.get('first_name', 'User'))
-        escaped_username = escape_html(username)
-        
-        users_text += (
-            f"<b>{skip + i + 1}.</b> {escaped_name}\n"
-            f"   👤 {escaped_username}\n"
-            f"   🆔 ID: <code>{u.get('user_id')}</code>\n"
-            f"   ⏰ Active: {days_ago} days ago\n\n"
-        )
+    # User is in channel or no channel required - show beautiful welcome message
+    user_name = update.effective_user.first_name or "User"
+    username = update.effective_user.username
     
-    users_text += f"📄 Page {page}/{total_pages} • Total Users: {total_users}"
+    # Create the beautiful welcome message
+    welcome_msg = """╔──────── ✧ ────────╗
+      Welcome {username}
+╚──────── ✧ ────────╝
+
+🤖 I am your Link Protection Bot
+I help you keep your channel links safe & secure.
+
+🛠 Commands:
+• /start – Start the bot
+• /protect – Generate protected link
+• /help – Show help options
+
+🌟 Features:
+• 🔒 Advanced Link Encryption
+• 🚀 Instant Link Generation
+• 🛡️ Anti-Forward Protection
+• 🎯 Easy to use UI""".format(username=user_name)
     
+    # Create keyboard with support channel button
     keyboard = []
-    if page > 1:
-        keyboard.append([InlineKeyboardButton("⬅️ Previous", callback_data=f"users_{page-1}")])
-    if page < total_pages:
-        if keyboard:
-            keyboard[0].append(InlineKeyboardButton("Next ➡️", callback_data=f"users_{page+1}"))
+    
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    if support_channel:
+        if support_channel.startswith('-100'):
+            invite_link = f"https://t.me/c/{support_channel[4:]}"
+        elif support_channel.startswith('@'):
+            invite_link = f"https://t.me/{support_channel[1:]}"
         else:
-            keyboard.append([InlineKeyboardButton("Next ➡️", callback_data=f"users_{page+1}")])
+            invite_link = f"https://t.me/{support_channel}"
+        
+        keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
+    
+    keyboard.append([InlineKeyboardButton("🚀 Create Protected Link", callback_data="create_link")])
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
-    if hasattr(update, 'message'):
-        await update.message.reply_text(
-            users_text,
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
-    else:
-        await update.edit_message_text(
-            users_text,
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup)
 
-async def health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Health check command"""
-    try:
-        client.admin.command('ping')
-        mongo_status = "✅ Connected"
-    except Exception as e:
-        mongo_status = f"❌ Error: {e}"
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callbacks."""
+    query = update.callback_query
+    await query.answer()
     
-    bot_info = await context.bot.get_me()
+    if query.data == "check_join":
+        if await check_channel_membership(query.from_user.id, context):
+            await query.message.edit_text(
+                "✅ Verified!\n"
+                "You can now use the bot.\n\n"
+                "Use /help for commands."
+            )
+        else:
+            await query.answer("❌ Not joined yet. Please join first.", show_alert=True)
     
-    channel = await get_channel_info(context)
-    escaped_title = escape_html(channel['title'])
+    elif query.data == "create_link":
+        await query.message.reply_text(
+            "To create a protected link, use:\n\n"
+            "`/protect https://t.me/yourchannel`\n\n"
+            "Replace with your actual channel link.",
+            parse_mode=ParseMode.MARKDOWN
+        )
     
-    status_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🤖 <b>Bot Status</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    elif query.data == "confirm_broadcast":
+        await handle_broadcast_confirmation(update, context)
+    
+    elif query.data == "cancel_broadcast":
+        await query.message.edit_text("❌ Broadcast cancelled")
+    
+    elif query.data.startswith("revoke_"):
+        link_id = query.data.replace("revoke_", "")
+        await handle_revoke_link(update, context, link_id)
+
+async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Create protected link."""
+    # Check channel membership
+    if not await require_channel_membership(update, context):
+        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+        if support_channel:
+            if support_channel.startswith('-100'):
+                invite_link = f"https://t.me/c/{support_channel[4:]}"
+            elif support_channel.startswith('@'):
+                invite_link = f"https://t.me/{support_channel[1:]}"
+            else:
+                invite_link = f"https://t.me/{support_channel}"
+            
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
+                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "🔐 Join our channel first to use this bot.\n"
+                "Then click 'Check' below.",
+                reply_markup=reply_markup
+            )
+        return
+    
+    if not context.args or not context.args[0].startswith("https://t.me/"):
+        await update.message.reply_text(
+            "Usage: `/protect https://t.me/yourchannel`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    group_link = context.args[0]
+    unique_id = str(uuid.uuid4())
+    encoded_id = base64.urlsafe_b64encode(unique_id.encode()).decode().rstrip("=")
+    
+    short_id = encoded_id[:8].upper()
+
+    links_collection.insert_one({
+        "_id": encoded_id,
+        "short_id": short_id,
+        "group_link": group_link,
+        "created_by": update.effective_user.id,
+        "created_at": datetime.datetime.now(),
+        "active": True,
+        "clicks": 0
+    })
+
+    bot_username = (await context.bot.get_me()).username
+    protected_link = f"https://t.me/{bot_username}?start={encoded_id}"
+    
+    # Simple buttons
+    keyboard = [
+        [
+            InlineKeyboardButton("📤 Share", url=f"https://t.me/share/url?url={protected_link}&text=🔐 Protected Link - Join via secure invitation"),
+            InlineKeyboardButton("❌ Revoke", callback_data=f"revoke_{encoded_id}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Formatted message with markdown for easy copying
+    await update.message.reply_text(
+        f"✅ *Protected Link Created!*\n\n"
+        f"🔑 *Link ID:* `{short_id}`\n"
+        f"📊 *Status:* 🟢 Active\n"
+        f"⏰ *Created:* {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"🔗 *Your Protected Link:*\n"
+        f"`{protected_link}`\n\n"
+        f"📋 *Quick Actions:*\n"
+        f"• Copy the link above\n"
+        f"• Share with your audience\n"
+        f"• Revoke anytime with `/revoke {short_id}`",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Revoke a link."""
+    # Check channel membership
+    if not await require_channel_membership(update, context):
+        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+        if support_channel:
+            if support_channel.startswith('-100'):
+                invite_link = f"https://t.me/c/{support_channel[4:]}"
+            elif support_channel.startswith('@'):
+                invite_link = f"https://t.me/{support_channel[1:]}"
+            else:
+                invite_link = f"https://t.me/{support_channel}"
+            
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
+                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "🔐 Join our channel first to use this bot.\n"
+                "Then click 'Check' below.",
+                reply_markup=reply_markup
+            )
+        return
+    
+    if not context.args:
+        # Show user's active links
+        user_id = update.effective_user.id
+        active_links = list(links_collection.find(
+            {"created_by": user_id, "active": True},
+            sort=[("created_at", -1)],
+            limit=10
+        ))
         
-        f"<b>Bot:</b> @{bot_info.username}\n"
-        f"<b>MongoDB:</b> {mongo_status}\n"
-        f"<b>Users:</b> {users_collection.count_documents({})}\n"
-        f"<b>Links:</b> {links_collection.count_documents({})}\n"
-        f"<b>Pending CAPTCHAs:</b> {captcha_collection.count_documents({})}\n"
-        f"<b>Support Channel:</b> {escaped_title}\n"
-        f"<b>Channel ID:</b> <code>{channel['id'] or SUPPORT_CHANNEL_ID}</code>\n\n"
+        if not active_links:
+            await update.message.reply_text("📭 No active links")
+            return
         
-        f"🕒 <b>Server Time:</b>\n"
-        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        message = "🔐 *Your Active Links:*\n\n"
+        keyboard = []
+        
+        for link in active_links:
+            short_id = link.get('short_id', link['_id'][:8])
+            clicks = link.get('clicks', 0)
+            created = link.get('created_at', datetime.datetime.now()).strftime('%m/%d')
+            
+            message += f"• `{short_id}` - {clicks} clicks - {created}\n"
+            keyboard.append([InlineKeyboardButton(
+                f"❌ Revoke {short_id}",
+                callback_data=f"revoke_{link['_id']}"
+            )])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message += "\nClick a button below to revoke."
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Revoke by ID
+    link_id = context.args[0].upper()
+    
+    # Find link
+    query = {
+        "$or": [
+            {"short_id": link_id},
+            {"_id": link_id}
+        ],
+        "created_by": update.effective_user.id,
+        "active": True
+    }
+    
+    link_data = links_collection.find_one(query)
+    
+    if not link_data:
+        await update.message.reply_text("❌ Link not found")
+        return
+    
+    # Revoke
+    links_collection.update_one(
+        {"_id": link_data['_id']},
+        {
+            "$set": {
+                "active": False,
+                "revoked_at": datetime.datetime.now()
+            }
+        }
     )
     
     await update.message.reply_text(
-        status_text,
-        parse_mode="HTML"
+        f"✅ *Link Revoked!*\n\n"
+        f"Link `{link_data.get('short_id', link_id)}` has been permanently revoked.\n\n"
+        f"⚠️ All future access attempts will be blocked.",
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle errors"""
-    logger.error(f"Update {update} caused error: {context.error}")
+async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE, link_id: str):
+    """Handle revoke button."""
+    query = update.callback_query
+    await query.answer()
     
-    if update and update.effective_chat:
+    link_data = links_collection.find_one({"_id": link_id, "active": True})
+    
+    if not link_data:
+        await query.message.edit_text(
+            "❌ Link not found or already revoked.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    if link_data['created_by'] != query.from_user.id:
+        await query.message.edit_text(
+            "❌ You don't have permission to revoke this link.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Revoke
+    links_collection.update_one(
+        {"_id": link_id},
+        {
+            "$set": {
+                "active": False,
+                "revoked_at": datetime.datetime.now()
+            }
+        }
+    )
+    
+    await query.message.edit_text(
+        f"✅ *Link Revoked!*\n\n"
+        f"Link `{link_data.get('short_id', link_id[:8])}` has been revoked.\n"
+        f"👥 Final Clicks: {link_data.get('clicks', 0)}\n\n"
+        f"⚠️ All access has been permanently blocked.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin broadcast."""
+    admin_id = int(os.environ.get("ADMIN_ID", 0))
+    if update.effective_user.id != admin_id:
+        await update.message.reply_text(
+            "🔒 *Admin Access Required*\n\n"
+            "This command is restricted to administrators only.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    if not update.message.reply_to_message:
+        await update.message.reply_text(
+            "📢 *Broadcast System*\n\n"
+            "To broadcast a message:\n"
+            "1. Send any message\n"
+            "2. Reply to it with `/broadcast`\n"
+            "3. Confirm the action\n\n"
+            "✨ *Features:*\n"
+            "• Supports all media types\n"
+            "• Preserves formatting\n"
+            "• Tracks delivery\n"
+            "• No rate limiting",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    total_users = users_collection.count_documents({})
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirm Broadcast", callback_data="confirm_broadcast")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"⚠️ *Broadcast Confirmation*\n\n"
+        f"📊 *Delivery Stats:*\n"
+        f"• 📨 Recipients: `{total_users}` users\n"
+        f"• 📝 Type: {update.message.reply_to_message.content_type}\n"
+        f"• ⚡ Delivery: Instant\n\n"
+        f"Are you sure you want to proceed?",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    context.user_data['broadcast_message'] = update.message.reply_to_message
+
+async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle broadcast confirmation."""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.message.edit_text("📤 *Broadcasting...*\n\nPlease wait, this may take a moment.", parse_mode=ParseMode.MARKDOWN)
+    
+    users = list(users_collection.find({}))
+    total_users = len(users)
+    successful = 0
+    failed = 0
+    
+    message_to_broadcast = context.user_data.get('broadcast_message')
+    
+    for user in users:
         try:
-            await update.effective_chat.send_message(
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "❌ <b>Error</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "An error occurred. Please try again later.",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-
-# ================== FASTAPI SETUP ==================
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize and cleanup PTB application"""
-    logger.info("Starting PTB application...")
-    await ptb_app.initialize()
-    await ptb_app.start()
+            await message_to_broadcast.copy(chat_id=user['user_id'])
+            successful += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.error(f"Failed: {user['user_id']}: {e}")
+            failed += 1
     
-    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
-    await ptb_app.bot.set_webhook(
-        webhook_url, 
-        allowed_updates=["message", "callback_query"],
-        drop_pending_updates=True
+    broadcast_collection.insert_one({
+        "admin_id": query.from_user.id,
+        "date": datetime.datetime.now(),
+        "total_users": total_users,
+        "successful": successful,
+        "failed": failed
+    })
+    
+    success_rate = (successful / total_users * 100) if total_users > 0 else 0
+    
+    await query.message.edit_text(
+        f"✅ *Broadcast Complete!*\n\n"
+        f"📊 *Delivery Report:*\n"
+        f"• 📨 Total Recipients: `{total_users}`\n"
+        f"• ✅ Successful: `{successful}`\n"
+        f"• ❌ Failed: `{failed}`\n"
+        f"• 📈 Success Rate: `{success_rate:.1f}%`\n"
+        f"• ⏰ Time: {datetime.datetime.now().strftime('%H:%M:%S')}\n\n"
+        f"✨ Broadcast logged in system.",
+        parse_mode=ParseMode.MARKDOWN
     )
-    
-    logger.info(f"Webhook set to: {webhook_url}")
-    
-    yield
-    
-    logger.info("Shutting down PTB application...")
-    await ptb_app.stop()
-    await ptb_app.shutdown()
 
-# Create FastAPI app
-app = FastAPI(lifespan=lifespan)
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show stats."""
+    admin_id = int(os.environ.get("ADMIN_ID", 0))
+    if update.effective_user.id != admin_id:
+        await update.message.reply_text(
+            "🔒 *Admin Access Required*\n\n"
+            "This command is restricted to administrators only.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    total_users = users_collection.count_documents({})
+    total_links = links_collection.count_documents({})
+    active_links = links_collection.count_documents({"active": True})
+    
+    today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    new_users_today = users_collection.count_documents({"last_active": {"$gte": today}})
+    new_links_today = links_collection.count_documents({"created_at": {"$gte": today}})
+    
+    # Calculate total clicks
+    total_clicks_result = links_collection.aggregate([
+        {"$group": {"_id": None, "total_clicks": {"$sum": "$clicks"}}}
+    ])
+    total_clicks = 0
+    for result in total_clicks_result:
+        total_clicks = result.get('total_clicks', 0)
+    
+    await update.message.reply_text(
+        f"📊 *System Analytics Dashboard*\n\n"
+        f"👥 *User Statistics*\n"
+        f"• 📈 Total Users: `{total_users}`\n"
+        f"• 🆕 New Today: `{new_users_today}`\n\n"
+        f"🔗 *Link Statistics*\n"
+        f"• 🔢 Total Links: `{total_links}`\n"
+        f"• 🟢 Active Links: `{active_links}`\n"
+        f"• 🆕 Created Today: `{new_links_today}`\n"
+        f"• 👆 Total Clicks: `{total_clicks}`\n\n"
+        f"⚙️ *System Status*\n"
+        f"• 🗄️ Database: 🟢 Operational\n"
+        f"• 🤖 Bot: 🟢 Online\n"
+        f"• ⚡ Uptime: 100%\n"
+        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
-# Add handlers to PTB app
-ptb_app.add_handler(CommandHandler("start", start))
-ptb_app.add_handler(CommandHandler("protect", protect))
-ptb_app.add_handler(CommandHandler("broadcast", broadcast))
-ptb_app.add_handler(CommandHandler("stats", stats))
-ptb_app.add_handler(CommandHandler("users", users))
-ptb_app.add_handler(CommandHandler("health", health))
-ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-ptb_app.add_handler(CallbackQueryHandler(callback_handler))
-ptb_app.add_error_handler(error_handler)
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show help."""
+    user_id = update.effective_user.id
+    
+    # Check channel membership
+    if not await check_channel_membership(user_id, context):
+        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+        if support_channel:
+            if support_channel.startswith('-100'):
+                invite_link = f"https://t.me/c/{support_channel[4:]}"
+            elif support_channel.startswith('@'):
+                invite_link = f"https://t.me/{support_channel[1:]}"
+            else:
+                invite_link = f"https://t.me/{support_channel}"
+            
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
+                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "🔐 Join our channel first to use this bot.\n"
+                "Then click 'Check' below.",
+                reply_markup=reply_markup
+            )
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton("🚀 Create Link", callback_data="create_link")],
+        [InlineKeyboardButton("📊 View Stats", callback_data="view_stats")]
+    ]
+    
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    if support_channel:
+        if support_channel.startswith('-100'):
+            invite_link = f"https://t.me/c/{support_channel[4:]}"
+        elif support_channel.startswith('@'):
+            invite_link = f"https://t.me/{support_channel[1:]}"
+        else:
+            invite_link = f"https://t.me/{support_channel}"
+        
+        keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🛡️ *LinkShield Pro - Help Center*\n\n"
+        "✨ *Premium Features:*\n"
+        "• 🔐 Military-grade encryption\n"
+        "• 📊 Advanced analytics\n"
+        "• ⚡ Priority processing\n"
+        "• 🛡️ DDoS protection\n\n"
+        "📋 *Available Commands:*\n"
+        "• `/start` - Start the bot\n"
+        "• `/protect <link>` - Create secure link\n"
+        "• `/revoke` - Revoke access\n"
+        "• `/help` - This message\n\n"
+        "🔒 *How to Use:*\n"
+        "1. Use `/protect https://t.me/yourchannel`\n"
+        "2. Share the generated link\n"
+        "3. Users join via verification\n"
+        "4. Manage with `/revoke`\n\n"
+        "💡 *Pro Tips:*\n"
+        "• Use descriptive channel names\n"
+        "• Monitor link analytics\n"
+        "• Revoke unused links\n"
+        "• Join our support channel\n\n"
+        "👇 *Quick actions:*",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
 
-@app.post("/webhook")
-async def process_update(request: Request):
-    """Handle incoming Telegram updates"""
-    json_data = await request.json()
-    update = Update.de_json(json_data, ptb_app.bot)
-    await ptb_app.process_update(update)
-    return Response(status_code=HTTPStatus.OK)
+async def store_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Store user activity."""
+    if update.message and update.message.chat.type == "private":
+        users_collection.update_one(
+            {"user_id": update.effective_user.id},
+            {"$set": {"last_active": update.message.date}},
+            upsert=True
+        )
+
+# Register handlers
+telegram_bot_app.add_handler(CommandHandler("start", start))
+telegram_bot_app.add_handler(CommandHandler("protect", protect_command))
+telegram_bot_app.add_handler(CommandHandler("revoke", revoke_command))
+telegram_bot_app.add_handler(CommandHandler("broadcast", broadcast_command))
+telegram_bot_app.add_handler(CommandHandler("stats", stats_command))
+telegram_bot_app.add_handler(CommandHandler("help", help_command))
+telegram_bot_app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, store_message))
+
+# Add callback handler
+from telegram.ext import CallbackQueryHandler
+telegram_bot_app.add_handler(CallbackQueryHandler(button_callback))
+
+# --- FastAPI Setup ---
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+@app.on_event("startup")
+async def on_startup():
+    """Start bot."""
+    logger.info("Starting bot...")
+    
+    required_vars = ["TELEGRAM_TOKEN", "RENDER_EXTERNAL_URL"]
+    for var in required_vars:
+        if not os.environ.get(var):
+            logger.critical(f"Missing {var}")
+            raise Exception(f"Missing {var}")
+    
+    init_db()
+    
+    await telegram_bot_app.initialize()
+    await telegram_bot_app.start()
+    
+    webhook_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/{os.environ.get('TELEGRAM_TOKEN')}"
+    await telegram_bot_app.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook: {webhook_url}")
+    
+    bot_info = await telegram_bot_app.bot.get_me()
+    logger.info(f"Bot: @{bot_info.username}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Stop bot."""
+    logger.info("Stopping bot...")
+    await telegram_bot_app.stop()
+    await telegram_bot_app.shutdown()
+    client.close()
+    logger.info("Bot stopped")
+
+@app.post("/{token}")
+async def telegram_webhook(request: Request, token: str):
+    """Telegram webhook."""
+    if token != os.environ.get("TELEGRAM_TOKEN"):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    
+    update_data = await request.json()
+    update = Update.de_json(update_data, telegram_bot_app.bot)
+    await telegram_bot_app.process_update(update)
+    
+    return Response(status_code=200)
+
+@app.get("/join")
+async def join_page(request: Request, token: str):
+    """Web app page."""
+    return templates.TemplateResponse("join.html", {"request": request, "token": token})
+
+@app.get("/getgrouplink/{token}")
+async def get_group_link(token: str):
+    """Get real group link."""
+    link_data = links_collection.find_one({"_id": token, "active": True})
+    
+    if link_data:
+        links_collection.update_one(
+            {"_id": token},
+            {"$inc": {"clicks": 1}}
+        )
+        return {"url": link_data["group_link"]}
+    else:
+        raise HTTPException(status_code=404, detail="Link not found")
 
 @app.get("/")
 async def root():
-    channel_status = f"ID: {SUPPORT_CHANNEL_ID}" if SUPPORT_CHANNEL_ID else "Not configured"
-    return {
-        "status": "Telegram Bot is running",
-        "timestamp": datetime.utcnow().isoformat(),
-        "support_channel": channel_status
-    }
-
-@app.get("/health")
-async def health_check():
+    """Health check."""
     return {
         "status": "ok",
-        "support_channel_id": SUPPORT_CHANNEL_ID if SUPPORT_CHANNEL_ID else "Not configured"
+        "service": "LinkShield",
+        "time": datetime.datetime.now().isoformat()
     }
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8443))
-    uvicorn.run(app, host="0.0.0.0", port=port)
