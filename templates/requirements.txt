@@ -1,0 +1,6 @@
+python-telegram-bot[webhooks]
+fastapi
+uvicorn[standard]
+jinja2
+pymongo
+dnspython
