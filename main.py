@@ -493,7 +493,6 @@ async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"⚠️ All access has been permanently blocked.",
         parse_mode=ParseMode.MARKDOWN
     )
-
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin broadcast."""
     admin_id = int(os.environ.get("ADMIN_ID", 0))
@@ -528,11 +527,14 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Safely get content_type with default fallback
+    content_type = getattr(update.message.reply_to_message, 'content_type', 'text')
+    
     await update.message.reply_text(
         f"⚠️ *Broadcast Confirmation*\n\n"
         f"📊 *Delivery Stats:*\n"
         f"• 📨 Recipients: `{total_users}` users\n"
-        f"• 📝 Type: {update.message.reply_to_message.content_type}\n"
+        f"• 📝 Type: {content_type}\n"
         f"• ⚡ Delivery: Instant\n\n"
         f"Are you sure you want to proceed?",
         reply_markup=reply_markup,
