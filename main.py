@@ -165,6 +165,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         upsert=True
     )
     
+    # First check channel membership regardless of args
+    if not await check_channel_membership(user_id, context):
+        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+        if support_channel:
+            # Get channel invite link
+            invite_link = await get_channel_invite_link(context, support_channel)
+            
+            # If there's a protected link argument, include it in callback data
+            if context.args:
+                encoded_id = context.args[0]
+                callback_data = f"check_join_{encoded_id}"
+            else:
+                callback_data = "check_join"
+            
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
+                [InlineKeyboardButton("✅ Check", callback_data=callback_data)]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            if context.args:
+                message_text = (
+                    "🔐 *This is a Protected Link*\n\n"
+                    "Join our channel first to access this link.\n"
+                    "Then click 'Check' below."
+                )
+            else:
+                message_text = (
+                    "🔐 Join our channel first to use this bot.\n"
+                    "Then click 'Check' below."
+                )
+            
+            await update.message.reply_text(
+                message_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN if context.args else None
+            )
+            return
+    
+    # User is in channel or no channel required
+    
     # Check if this is a protected link (has argument)
     if context.args:
         encoded_id = context.args[0]
@@ -185,27 +226,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text("❌ Link expired or revoked")
         return
     
-    # If no args, check channel membership first
-    if not await check_channel_membership(user_id, context):
-        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-        if support_channel:
-            # Get channel invite link
-            invite_link = await get_channel_invite_link(context, support_channel)
-            
-            keyboard = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                "🔐 Join our channel first to use this bot.\n"
-                "Then click 'Check' below.",
-                reply_markup=reply_markup
-            )
-            return
-    
-    # User is in channel or no channel required - show beautiful welcome message
+    # If no args, show beautiful welcome message
     user_name = update.effective_user.first_name or "User"
     
     # Create the beautiful welcome message
@@ -253,6 +274,30 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "You can now use the bot.\n\n"
                 "Use /help for commands."
             )
+        else:
+            await query.answer("❌ Not joined yet. Please join first.", show_alert=True)
+    
+    elif query.data.startswith("check_join_"):
+        # Handle check join for protected links
+        encoded_id = query.data.replace("check_join_", "")
+        
+        if await check_channel_membership(query.from_user.id, context):
+            # User has joined, show protected link
+            link_data = links_collection.find_one({"_id": encoded_id, "active": True})
+            
+            if link_data:
+                web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/join?token={encoded_id}"
+                
+                keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.message.edit_text(
+                    "✅ Verified!\n\n"
+                    "You can now access the protected link.",
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.message.edit_text("❌ Link expired or revoked")
         else:
             await query.answer("❌ Not joined yet. Please join first.", show_alert=True)
     
@@ -493,6 +538,7 @@ async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"⚠️ All access has been permanently blocked.",
         parse_mode=ParseMode.MARKDOWN
     )
+
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin broadcast."""
     admin_id = int(os.environ.get("ADMIN_ID", 0))
@@ -629,7 +675,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"• 🗄️ Database: 🟢 Operational\n"
         f"• 🤖 Bot: 🟢 Online\n"
         f"• ⚡ Uptime: 100%\n"
-        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-d %H:%M:%S')}",
         parse_mode=ParseMode.MARKDOWN
     )
 
