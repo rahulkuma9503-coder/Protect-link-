@@ -4,22 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TEAM SECRET — Join</title>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Cormorant+Garamond:wght@400;500;600;700&family=Orbitron:wght@400;700&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
 
 <style>
 :root{
   --bg:#000;
-  --neon:#33ffff;
-  --neon-soft:#77ffff;
-  --glow:rgba(80,255,255,0.55);
-  --glow-soft:rgba(120,255,255,0.35);
-  --aura-opacity:0.55;
+  --neon-cyan:#00ffff;
+  --neon-purple:#b800ff;
+  --neon-pink:#ff00ff;
+  --glow-cyan:rgba(0,255,255,0.8);
+  --glow-purple:rgba(184,0,255,0.6);
 }
 
+*{margin:0;padding:0;box-sizing:border-box}
+
 body{
-  margin:0;
   font-family:'Rajdhani', sans-serif;
-  background:var(--bg);
+  background:#000;
   height:100vh;
   overflow:hidden;
   display:flex;
@@ -29,94 +30,344 @@ body{
   position:relative;
 }
 
-/* Matrix & Stars */
-#matrix-bg{position:absolute;inset:0;z-index:-10}
-.stars{position:absolute;inset:0;z-index:-9;pointer-events:none}
-.star{position:absolute;width:3px;height:3px;background:var(--neon-soft);border-radius:50%;opacity:0.7;animation:twinkle 3s infinite ease-in-out}
-@keyframes twinkle{0%{opacity:.2}50%{opacity:.9}100%{opacity:.2}}
+/* Animated Grid Background */
+#grid-bg{
+  position:absolute;
+  inset:0;
+  background-image:
+    linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px);
+  background-size:50px 50px;
+  animation:gridMove 20s linear infinite;
+  z-index:-10;
+}
+@keyframes gridMove{
+  0%{background-position:0 0}
+  100%{background-position:50px 50px}
+}
 
-/* Neon Ring & Aura */
-.neon-ring{position:absolute;width:380px;height:380px;border:3px solid rgba(80,255,255,0.25);border-radius:50%;filter:blur(1px);animation:spin 14s linear infinite;z-index:-8;box-shadow:0 0 35px var(--glow),0 0 50px var(--glow-soft)}
+/* Matrix Rain */
+#matrix-bg{position:absolute;inset:0;z-index:-9;opacity:0.4}
+
+/* Particles */
+.particles{position:absolute;inset:0;z-index:-8;pointer-events:none;overflow:hidden}
+.particle{position:absolute;width:4px;height:4px;background:var(--neon-cyan);border-radius:50%;animation:float-particle 8s infinite ease-in-out}
+@keyframes float-particle{
+  0%,100%{transform:translateY(0) translateX(0);opacity:0.3}
+  50%{transform:translateY(-100px) translateX(50px);opacity:1}
+}
+
+/* Rotating Rings */
+.ring-container{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:-7;pointer-events:none}
+.neon-ring{
+  position:absolute;
+  border-radius:50%;
+  border:2px solid;
+  filter:blur(1px);
+}
+.ring1{width:600px;height:600px;border-color:rgba(0,255,255,0.3);animation:spin 20s linear infinite;box-shadow:0 0 40px var(--glow-cyan)}
+.ring2{width:450px;height:450px;border-color:rgba(184,0,255,0.3);animation:spin 15s linear infinite reverse;box-shadow:0 0 40px var(--glow-purple)}
+.ring3{width:300px;height:300px;border-color:rgba(255,0,255,0.3);animation:spin 25s linear infinite;box-shadow:0 0 40px rgba(255,0,255,0.5)}
 @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
 
-.neon-aura{position:absolute;inset:0;background:radial-gradient(circle,var(--neon) 0%,rgba(0,255,255,0.18) 40%,transparent 70%);z-index:-7;animation:pulse 5s infinite alternate ease-in-out;filter:blur(40px);opacity:var(--aura-opacity)}
-@keyframes pulse{0%{opacity:.45}100%{opacity:.75}}
+/* Radial Glow */
+.radial-glow{
+  position:absolute;
+  inset:0;
+  background:radial-gradient(circle at center,rgba(0,255,255,0.15) 0%,rgba(184,0,255,0.1) 35%,transparent 70%);
+  z-index:-6;
+  animation:pulse-glow 4s infinite alternate ease-in-out;
+}
+@keyframes pulse-glow{
+  0%{opacity:0.5;transform:scale(0.95)}
+  100%{opacity:1;transform:scale(1.05)}
+}
 
-/* Container */
+/* Main Container */
 .container{
-  background:rgba(255,255,255,0.03);
-  padding:50px 60px;
-  border-radius:28px;
-  border:1.5px solid rgba(100,255,255,0.25);
-  backdrop-filter:blur(15px);
+  background:linear-gradient(135deg, rgba(0,20,40,0.8) 0%, rgba(20,0,40,0.8) 100%);
+  padding:60px 70px;
+  border-radius:30px;
+  border:2px solid;
+  border-image:linear-gradient(135deg, var(--neon-cyan), var(--neon-purple), var(--neon-pink)) 1;
+  backdrop-filter:blur(20px);
   text-align:center;
   position:relative;
-  animation:float 4s ease-in-out infinite alternate;
-  box-shadow:0 0 30px rgba(80,255,255,0.15),0 0 50px rgba(80,255,255,0.12),inset 0 0 20px rgba(80,255,255,0.06);
-  z-index:2;
+  animation:float-container 5s ease-in-out infinite alternate;
+  box-shadow:
+    0 0 60px rgba(0,255,255,0.4),
+    0 0 100px rgba(184,0,255,0.3),
+    inset 0 0 40px rgba(0,255,255,0.1);
+  z-index:10;
+  max-width:500px;
+  overflow:hidden;
 }
-@keyframes float{0%{transform:translateY(0)}100%{transform:translateY(-10px)}}
+@keyframes float-container{
+  0%{transform:translateY(0) scale(1)}
+  100%{transform:translateY(-15px) scale(1.02)}
+}
 
+.container::before{
+  content:'';
+  position:absolute;
+  top:-50%;
+  left:-50%;
+  width:200%;
+  height:200%;
+  background:conic-gradient(from 0deg, transparent, rgba(0,255,255,0.3), transparent, rgba(184,0,255,0.3), transparent);
+  animation:rotate-border 6s linear infinite;
+  z-index:-1;
+}
+@keyframes rotate-border{
+  0%{transform:rotate(0deg)}
+  100%{transform:rotate(360deg)}
+}
+
+/* Logo/Badge */
+.logo-badge{
+  width:100px;
+  height:100px;
+  margin:0 auto 20px;
+  border-radius:50%;
+  background:linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 0 30px var(--glow-cyan), 0 0 50px var(--glow-purple);
+  animation:pulse-badge 2s infinite ease-in-out;
+  position:relative;
+  padding:5px;
+}
+@keyframes pulse-badge{
+  0%,100%{transform:scale(1);box-shadow:0 0 30px var(--glow-cyan)}
+  50%{transform:scale(1.1);box-shadow:0 0 50px var(--glow-cyan), 0 0 70px var(--glow-purple)}
+}
+
+.logo-badge::before{
+  content:'';
+  position:absolute;
+  inset:-5px;
+  border-radius:50%;
+  border:2px solid transparent;
+  border-top-color:var(--neon-cyan);
+  border-right-color:var(--neon-purple);
+  animation:spin 3s linear infinite;
+}
+
+.logo-badge img{
+  width:100%;
+  height:100%;
+  border-radius:50%;
+  object-fit:cover;
+}
+
+/* Title */
 h1{
-  font-family:'Cormorant Garamond', serif;
-  font-weight:700;
-  font-size:3em;
-  color:var(--neon-soft);
-  text-shadow:0 0 15px var(--glow),0 0 30px var(--glow-soft);
-  margin:0 0 10px 0;
+  font-family:'Orbitron', sans-serif;
+  font-weight:900;
+  font-size:3.2em;
+  background:linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon-purple) 50%, var(--neon-pink) 100%);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  margin:0 0 15px 0;
+  letter-spacing:4px;
+  text-shadow:0 0 30px var(--glow-cyan);
+  animation:glow-title 3s infinite alternate ease-in-out;
+}
+@keyframes glow-title{
+  0%{filter:drop-shadow(0 0 10px var(--glow-cyan))}
+  100%{filter:drop-shadow(0 0 25px var(--glow-purple))}
 }
 
-p{
-  font-size:1.25em;
-  color:#e8fefe;
-  margin-top:0;
-  margin-bottom:18px;
-  text-shadow:0 0 10px var(--glow-soft);
-}
-
-/* Neon Button */
-.join-button{
-  padding:16px 55px;
-  font-size:1.25em;
-  border-radius:16px;
-  border:1.5px solid var(--neon-soft);
-  background:rgba(0,255,255,0.1);
-  color:#001;
-  cursor:pointer;
-  transition:.28s;
-  font-family:'Cormorant Garamond', serif;
-  font-weight:600;
-  box-shadow:0 0 20px rgba(120,255,255,0.25), inset 0 0 12px rgba(255,255,255,0.05);
+/* Subtitle */
+.status{
+  font-size:1.3em;
+  color:#fff;
+  margin:15px 0 30px 0;
+  font-weight:300;
   letter-spacing:2px;
+  text-transform:uppercase;
+  position:relative;
+  display:inline-block;
 }
+.status::before,.status::after{
+  content:'';
+  position:absolute;
+  width:30px;
+  height:2px;
+  background:linear-gradient(90deg, transparent, var(--neon-cyan));
+  top:50%;
+}
+.status::before{left:-40px}
+.status::after{right:-40px;background:linear-gradient(90deg, var(--neon-cyan), transparent)}
+
+/* Scanning Animation */
+.scanning{
+  position:relative;
+  padding:8px 0;
+  margin:20px 0;
+}
+.scan-line{
+  width:100%;
+  height:2px;
+  background:linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+  animation:scan 2s infinite ease-in-out;
+  box-shadow:0 0 10px var(--glow-cyan);
+}
+@keyframes scan{
+  0%,100%{opacity:0.3;transform:scaleX(0.5)}
+  50%{opacity:1;transform:scaleX(1)}
+}
+
+/* Button */
+.join-button{
+  padding:20px 70px;
+  font-size:1.4em;
+  border-radius:50px;
+  border:2px solid var(--neon-cyan);
+  background:linear-gradient(135deg, rgba(0,255,255,0.2), rgba(184,0,255,0.2));
+  color:#fff;
+  cursor:pointer;
+  transition:all 0.3s ease;
+  font-family:'Orbitron', sans-serif;
+  font-weight:700;
+  letter-spacing:3px;
+  text-transform:uppercase;
+  position:relative;
+  overflow:hidden;
+  box-shadow:
+    0 0 20px var(--glow-cyan),
+    inset 0 0 20px rgba(0,255,255,0.1);
+}
+
+.join-button::before{
+  content:'';
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:0;
+  height:0;
+  border-radius:50%;
+  background:radial-gradient(circle, var(--neon-cyan), transparent);
+  transform:translate(-50%, -50%);
+  transition:width 0.6s, height 0.6s;
+}
+
+.join-button:hover::before{
+  width:300px;
+  height:300px;
+}
+
 .join-button:hover{
-  background:var(--neon-soft);
-  color:#000;
-  transform:scale(1.1);
-  box-shadow:0 0 45px var(--glow),0 0 70px var(--glow-soft);
+  background:linear-gradient(135deg, rgba(0,255,255,0.4), rgba(184,0,255,0.4));
+  transform:translateY(-3px) scale(1.05);
+  box-shadow:
+    0 0 40px var(--glow-cyan),
+    0 0 60px var(--glow-purple),
+    0 10px 30px rgba(0,0,0,0.5);
+  border-color:var(--neon-purple);
+}
+
+.join-button:active{
+  transform:translateY(0) scale(1);
 }
 
 .join-button:disabled{
   opacity:0.6;
   cursor:not-allowed;
-  transform:scale(1);
+  transform:none;
 }
 
-.small-note{font-size:0.9em;color:#dffefe;margin-top:12px;text-shadow:0 0 6px var(--glow-soft)}
+.button-text{
+  position:relative;
+  z-index:1;
+}
+
+/* Features */
+.features{
+  display:flex;
+  justify-content:center;
+  gap:30px;
+  margin-top:25px;
+  font-size:0.95em;
+  color:#aaf;
+}
+
+.feature{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-weight:300;
+  letter-spacing:1px;
+}
+
+.feature-icon{
+  width:8px;
+  height:8px;
+  background:var(--neon-cyan);
+  border-radius:50%;
+  box-shadow:0 0 10px var(--glow-cyan);
+  animation:pulse-icon 2s infinite ease-in-out;
+}
+@keyframes pulse-icon{
+  0%,100%{transform:scale(1);opacity:0.7}
+  50%{transform:scale(1.3);opacity:1}
+}
+
+/* Responsive */
+@media(max-width:600px){
+  .container{padding:40px 30px}
+  h1{font-size:2.2em}
+  .join-button{padding:18px 50px;font-size:1.2em}
+  .features{flex-direction:column;gap:15px}
+  .ring1,.ring2,.ring3{width:300px;height:300px}
+}
 </style>
 </head>
 <body>
 
+<div id="grid-bg"></div>
 <canvas id='matrix-bg'></canvas>
-<div class='stars'></div>
-<div class='neon-ring'></div>
-<div class='neon-aura'></div>
+<div class='particles'></div>
+
+<div class='ring-container'>
+  <div class='neon-ring ring1'></div>
+  <div class='neon-ring ring2'></div>
+  <div class='neon-ring ring3'></div>
+</div>
+
+<div class='radial-glow'></div>
 
 <div class='container'>
+  <div class='logo-badge'>
+    <img src='https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg' alt='Team Secret Logo'>
+  </div>
   <h1>TEAM SECRET</h1>
-  <p>Verifying your identity…</p>
-  <button id="joinBtn" class='join-button'>Join Now</button>
-  <div class='small-note'>Secure · Verified · Exclusive</div>
+  <div class='status'>Verifying Identity</div>
+  
+  <div class='scanning'>
+    <div class='scan-line'></div>
+  </div>
+  
+  <button id="joinBtn" class='join-button'>
+    <span class='button-text'>Join Now</span>
+  </button>
+  
+  <div class='features'>
+    <div class='feature'>
+      <div class='feature-icon'></div>
+      <span>Secure</span>
+    </div>
+    <div class='feature'>
+      <div class='feature-icon'></div>
+      <span>Verified</span>
+    </div>
+    <div class='feature'>
+      <div class='feature-icon'></div>
+      <span>Exclusive</span>
+    </div>
+  </div>
 </div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -124,19 +375,19 @@ p{
 /* Matrix Background */
 const canvas=document.getElementById('matrix-bg');
 const ctx=canvas.getContext('2d');
-function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}
 window.addEventListener('resize',resizeCanvas);resizeCanvas();
 
-const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*()*&^%+-/~{[|`]}';
+const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*()';
 const arr=chars.split('');
-const fontSize=Math.max(13,Math.floor(window.innerWidth/85));
+const fontSize=14;
 let cols=Math.floor(canvas.width/fontSize);
 let drops=new Array(cols).fill(1);
 
 function draw(){
-  ctx.fillStyle='rgba(0,0,0,0.08)';
+  ctx.fillStyle='rgba(0,0,0,0.05)';
   ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='rgba(120,255,255,0.7)';
+  ctx.fillStyle='rgba(0,255,255,0.5)';
   ctx.font=fontSize+'px monospace';
   for(let i=0;i<drops.length;i++){
     const text=arr[Math.floor(Math.random()*arr.length)];
@@ -145,17 +396,18 @@ function draw(){
     drops[i]++;
   }
 }
-setInterval(draw,35);
+setInterval(draw,40);
 
-/* Stars */
-const starContainer=document.querySelector('.stars');
-for(let i=0;i<70;i++){
-  let star=document.createElement('div');
-  star.classList.add('star');
-  star.style.top=Math.random()*100+'%';
-  star.style.left=Math.random()*100+'%';
-  star.style.animationDelay=(Math.random()*2)+'s';
-  starContainer.appendChild(star);
+/* Floating Particles */
+const particleContainer=document.querySelector('.particles');
+for(let i=0;i<40;i++){
+  let particle=document.createElement('div');
+  particle.classList.add('particle');
+  particle.style.left=Math.random()*100+'%';
+  particle.style.top=Math.random()*100+'%';
+  particle.style.animationDelay=(Math.random()*8)+'s';
+  particle.style.animationDuration=(5+Math.random()*5)+'s';
+  particleContainer.appendChild(particle);
 }
 
 /* Telegram WebApp Integration */
@@ -166,29 +418,28 @@ tg.enableClosingConfirmation();
 
 document.getElementById('joinBtn').addEventListener('click', async () => {
   const joinBtn = document.getElementById('joinBtn');
-  joinBtn.textContent = 'Loading...';
+  const btnText = joinBtn.querySelector('.button-text');
+  btnText.textContent = 'Loading...';
   joinBtn.disabled = true;
 
   try {
-    const token = "{{ token }}"; // Server-side template variable
+    const token = "{{ token }}";
     const response = await fetch(`/getgrouplink/${token}`);
     const data = await response.json();
 
     if (data.url) {
-      // Use Telegram's native method to open links (best for t.me links)
+      btnText.textContent = 'Opening...';
       tg.openTelegramLink(data.url);
-      
-      // Close the WebApp after a short delay
       setTimeout(() => tg.close(), 1000);
     } else {
       alert('Error: Could not retrieve the group link.');
-      joinBtn.textContent = 'Join Now';
+      btnText.textContent = 'Join Now';
       joinBtn.disabled = false;
     }
   } catch (error) {
     console.error('Fetch error:', error);
     alert('An error occurred. Please try again.');
-    joinBtn.textContent = 'Join Now';
+    btnText.textContent = 'Join Now';
     joinBtn.disabled = false;
   }
 });
