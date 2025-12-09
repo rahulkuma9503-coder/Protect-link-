@@ -96,6 +96,12 @@ p{
   box-shadow:0 0 45px var(--glow),0 0 70px var(--glow-soft);
 }
 
+.join-button:disabled{
+  opacity:0.6;
+  cursor:not-allowed;
+  transform:scale(1);
+}
+
 .small-note{font-size:0.9em;color:#dffefe;margin-top:12px;text-shadow:0 0 6px var(--glow-soft)}
 </style>
 </head>
@@ -153,35 +159,38 @@ for(let i=0;i<70;i++){
 }
 
 /* Telegram WebApp Integration */
-document.addEventListener('DOMContentLoaded', () => {
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+tg.enableClosingConfirmation();
+
+document.getElementById('joinBtn').addEventListener('click', async () => {
   const joinBtn = document.getElementById('joinBtn');
-  const token = "{{ token }}"; // Replace with real token from server
+  joinBtn.textContent = 'Loading...';
+  joinBtn.disabled = true;
 
-  const tg = window.Telegram.WebApp;
-  tg.ready();
-  tg.expand();
-  tg.enableClosingConfirmation();
+  try {
+    const token = "{{ token }}"; // Server-side template variable
+    const response = await fetch(`/getgrouplink/${token}`);
+    const data = await response.json();
 
-  joinBtn.addEventListener('click', async () => {
-    joinBtn.textContent = 'Loading...';
-    joinBtn.disabled = true;
-
-    try {
-      const response = await fetch(`/getgrouplink/${token}`);
-      const data = await response.json();
-
-      if (data.url) {
-        window.open(data.url, '_blank');
-      } else {
-        alert('Error: Could not retrieve the group link.');
-      }
-    } catch (error) {
-      console.error('Fetch error:', error);
-      alert('An error occurred. Please try again.');
-    } finally {
-      setTimeout(()=>tg.close(),500);
+    if (data.url) {
+      // Use Telegram's native method to open links (best for t.me links)
+      tg.openTelegramLink(data.url);
+      
+      // Close the WebApp after a short delay
+      setTimeout(() => tg.close(), 1000);
+    } else {
+      alert('Error: Could not retrieve the group link.');
+      joinBtn.textContent = 'Join Now';
+      joinBtn.disabled = false;
     }
-  });
+  } catch (error) {
+    console.error('Fetch error:', error);
+    alert('An error occurred. Please try again.');
+    joinBtn.textContent = 'Join Now';
+    joinBtn.disabled = false;
+  }
 });
 </script>
 </body>
