@@ -147,6 +147,40 @@ async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_T
         logger.error(f"❌ Channel check error: {e}")
         return False
 
+async def verify_user_membership(user_id: int) -> bool:
+    """Check if user is member of support channel without context."""
+    from telegram import Bot
+    
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    if not support_channel:
+        return True
+    
+    try:
+        bot_token = os.environ.get("TELEGRAM_TOKEN")
+        if not bot_token:
+            return False
+            
+        # Create a bot instance
+        bot = Bot(token=bot_token)
+        
+        try:
+            chat_id = int(support_channel)
+        except ValueError:
+            if support_channel.startswith('@'):
+                chat_id = support_channel
+            else:
+                chat_id = f"@{support_channel}"
+        
+        try:
+            chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            return chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
+        except Exception as e:
+            logger.error(f"Channel check error: {e}")
+            return False
+    except Exception as e:
+        logger.error(f"Bot initialization error: {e}")
+        return False
+
 # --- Telegram Bot Logic ---
 telegram_bot_app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
 
@@ -160,6 +194,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         {"$set": {
             "username": update.effective_user.username,
             "first_name": update.effective_user.first_name,
+            "last_name": update.effective_user.last_name,
             "last_active": datetime.datetime.now()
         }},
         upsert=True
@@ -212,7 +247,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         link_data = links_collection.find_one({"_id": encoded_id, "active": True})
 
         if link_data:
-            web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/join?token={encoded_id}"
+            # Use verification page instead of direct join
+            web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}"
             
             keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -286,7 +322,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             link_data = links_collection.find_one({"_id": encoded_id, "active": True})
             
             if link_data:
-                web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/join?token={encoded_id}"
+                web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}"
                 
                 keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -815,9 +851,92 @@ async def telegram_webhook(request: Request, token: str):
     
     return Response(status_code=200)
 
+@app.get("/verify")
+async def verify_page(request: Request, token: str):
+    """Verification page."""
+    return templates.TemplateResponse("verify.html", {"request": request, "token": token})
+
+@app.get("/check_membership/{token}")
+async def check_membership_api(token: str, user_id: int):
+    """API to check if user is member of support channel."""
+    # First check if token is valid
+    link_data = links_collection.find_one({"_id": token, "active": True})
+    if not link_data:
+        raise HTTPException(status_code=404, detail="Link not found")
+    
+    # Check membership
+    is_member = await verify_user_membership(user_id)
+    
+    # Get support channel info
+    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
+    invite_link = None
+    
+    if support_channel and not is_member:
+        # Get invite link
+        try:
+            from telegram import Bot
+            bot_token = os.environ.get("TELEGRAM_TOKEN")
+            if bot_token:
+                bot = Bot(token=bot_token)
+                
+                try:
+                    chat_id = int(support_channel)
+                except ValueError:
+                    if support_channel.startswith('@'):
+                        chat_id = support_channel
+                    else:
+                        chat_id = f"@{support_channel}"
+                
+                try:
+                    # Try to get existing invite link
+                    chat = await bot.get_chat(chat_id)
+                    if chat.invite_link:
+                        invite_link = chat.invite_link
+                    elif chat.username:
+                        invite_link = f"https://t.me/{chat.username}"
+                    else:
+                        # Try to create one
+                        invite = await bot.create_chat_invite_link(
+                            chat_id=chat_id,
+                            creates_join_request=True,
+                            name="Bot Access Link"
+                        )
+                        invite_link = invite.invite_link
+                except Exception as e:
+                    logger.error(f"Failed to get invite link: {e}")
+                    if support_channel.startswith('-100'):
+                        invite_link = f"https://t.me/c/{support_channel[4:]}"
+                    elif support_channel.startswith('@'):
+                        invite_link = f"https://t.me/{support_channel[1:]}"
+        except Exception as e:
+            logger.error(f"Error getting invite link: {e}")
+    
+    return {
+        "is_member": is_member,
+        "invite_link": invite_link,
+        "support_channel": support_channel
+    }
+
 @app.get("/join")
-async def join_page(request: Request, token: str):
-    """Web app page."""
+async def join_page(request: Request, token: str, user_id: int):
+    """Join page after verification."""
+    # Check if token is valid
+    link_data = links_collection.find_one({"_id": token, "active": True})
+    if not link_data:
+        raise HTTPException(status_code=404, detail="Link not found")
+    
+    # Check membership
+    is_member = await verify_user_membership(user_id)
+    if not is_member:
+        # Redirect to verification page
+        raise HTTPException(status_code=303, detail="Not a member of support channel")
+    
+    # Increment clicks
+    links_collection.update_one(
+        {"_id": token},
+        {"$inc": {"clicks": 1}}
+    )
+    
     return templates.TemplateResponse("join.html", {"request": request, "token": token})
 
 @app.get("/getgrouplink/{token}")
