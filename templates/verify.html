@@ -16,6 +16,8 @@
   --glow-purple:rgba(184,0,255,0.6);
   --neon-green:#00ff00;
   --neon-red:#ff0000;
+  --neon-orange:#ff8c00;
+  --neon-gold:#ffd700;
 }
 
 *{margin:0;padding:0;box-sizing:border-box}
@@ -181,6 +183,10 @@ body{
   width:100%;
   margin:auto;
   overflow:hidden;
+  min-height:500px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
 }
 
 @keyframes float-container{
@@ -401,6 +407,7 @@ h1{
   display:inline-block;
   text-decoration:none;
   margin:10px 5px;
+  min-width:200px;
 }
 
 .verify-button::before, .join-channel-button::before, .join-now-button::before, .check-again-button::before{
@@ -448,8 +455,18 @@ h1{
 
 .join-channel-button{
   background:linear-gradient(135deg, rgba(255,165,0,0.3), rgba(255,69,0,0.3));
-  border-color:#ff8c00;
+  border-color:var(--neon-orange);
   box-shadow:0 0 20px rgba(255,140,0,0.5);
+}
+
+.join-channel-button::before{
+  background:radial-gradient(circle, var(--neon-orange), transparent);
+}
+
+.join-channel-button:hover{
+  background:linear-gradient(135deg, rgba(255,165,0,0.5), rgba(255,69,0,0.5));
+  border-color:#ff5500;
+  box-shadow:0 0 40px rgba(255,140,0,0.7), 0 0 60px rgba(255,69,0,0.5);
 }
 
 .join-now-button{
@@ -458,22 +475,44 @@ h1{
   box-shadow:0 0 20px rgba(0,255,0,0.5);
 }
 
+.join-now-button::before{
+  background:radial-gradient(circle, var(--neon-green), transparent);
+}
+
+.join-now-button:hover{
+  background:linear-gradient(135deg, rgba(0,255,0,0.5), rgba(0,128,0,0.5));
+  border-color:#00cc00;
+  box-shadow:0 0 40px rgba(0,255,0,0.7), 0 0 60px rgba(0,128,0,0.5);
+}
+
 .check-again-button{
   background:linear-gradient(135deg, rgba(255,255,0,0.3), rgba(255,215,0,0.3));
-  border-color:#ffd700;
+  border-color:var(--neon-gold);
   box-shadow:0 0 20px rgba(255,215,0,0.5);
+}
+
+.check-again-button::before{
+  background:radial-gradient(circle, var(--neon-gold), transparent);
+}
+
+.check-again-button:hover{
+  background:linear-gradient(135deg, rgba(255,255,0,0.5), rgba(255,215,0,0.5));
+  border-color:#ffed00;
+  box-shadow:0 0 40px rgba(255,215,0,0.7), 0 0 60px rgba(255,215,0,0.5);
 }
 
 /* Result Messages */
 .result-message{
   font-size:clamp(1em, 3vw, 1.2em);
   color:#fff;
-  margin:20px 0;
+  margin:15px 0;
   padding:15px;
   border-radius:10px;
   background:rgba(0,0,0,0.3);
   border-left:3px solid var(--neon-cyan);
   animation:fadeIn 0.5s ease-out;
+  line-height:1.5;
+  word-wrap:break-word;
 }
 
 @keyframes fadeIn{
@@ -516,28 +555,62 @@ h1{
 .button-container{
   display:flex;
   flex-direction:column;
+  align-items:center;
   gap:15px;
-  margin:30px 0;
+  margin:20px 0;
+  width:100%;
   animation:fadeIn 0.5s ease-out;
 }
 
-/* Feature Icons */
-.feature-icon{
-  width:8px;
-  height:8px;
-  background:var(--neon-cyan);
-  border-radius:50%;
-  box-shadow:0 0 10px var(--glow-cyan);
-  animation:pulse-icon 2s infinite ease-in-out;
+/* Content Area */
+.content-area{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  width:100%;
 }
 
-@keyframes pulse-icon{
+/* Initial State */
+#initial-state{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+/* Result Section */
+#result-section{
+  width:100%;
+  display:none;
+  flex-direction:column;
+  align-items:center;
+}
+
+/* Action Buttons */
+#action-buttons{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:15px;
+}
+
+/* Warning Icon */
+.warning-icon{
+  font-size:3em;
+  margin-bottom:15px;
+  animation:pulse-warning 2s infinite ease-in-out;
+}
+
+@keyframes pulse-warning{
   0%,100%{
     transform:scale(1);
-    opacity:0.7;
+    opacity:0.8;
   }
   50%{
-    transform:scale(1.3);
+    transform:scale(1.2);
     opacity:1;
   }
 }
@@ -548,12 +621,45 @@ h1{
   .container{
     padding:30px 20px;
     border-radius:20px;
+    min-height:450px;
   }
   .status{padding:0 20px}
-  .button-container{gap:10px}
   .verify-button, .join-channel-button, .join-now-button, .check-again-button{
     padding:15px 30px;
     font-size:1.1em;
+    min-width:180px;
+    width:100%;
+    max-width:250px;
+  }
+  .button-container, #action-buttons{
+    gap:12px;
+  }
+  .result-message{
+    padding:12px;
+    font-size:1em;
+  }
+}
+
+@media(max-height:600px){
+  .container{
+    padding:25px 20px;
+    min-height:auto;
+  }
+  .logo-badge{
+    width:70px;
+    height:70px;
+    margin-bottom:15px;
+  }
+  h1{
+    font-size:2em;
+    margin-bottom:10px;
+  }
+  .fullname-display{
+    margin-bottom:20px;
+    font-size:1.1em;
+  }
+  .scanning{
+    margin:15px 0;
   }
 }
 </style>
@@ -584,25 +690,45 @@ h1{
     <div class='scan-line'></div>
   </div>
   
-  <!-- Initial State: Verify Button -->
-  <div id="initial-state" class='button-container'>
-    <button id="verifyBtn" class='verify-button'>
-      <span class='button-text'>Check Membership</span>
-    </button>
+  <div class='content-area'>
+    <!-- Initial State: Verify Button -->
+    <div id="initial-state" class='button-container'>
+      <button id="verifyBtn" class='verify-button'>
+        <span class='button-text'>Check Membership</span>
+      </button>
+    </div>
+    
+    <!-- Verification Result -->
+    <div id="result-section">
+      <div id="result-message" class='result-message'></div>
+      <div id="action-buttons" class='button-container'></div>
+    </div>
+    
+    <!-- Loading -->
+    <div id="loading" class='loading'>Processing verification...</div>
   </div>
-  
-  <!-- Verification Result -->
-  <div id="result-section" style="display:none;">
-    <div id="result-message" class='result-message'></div>
-    <div id="action-buttons" class='button-container'></div>
-  </div>
-  
-  <!-- Loading -->
-  <div id="loading" class='loading'>Processing verification...</div>
 </div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
+// Global variables
+const token = "{{ token }}";
+const tg = window.Telegram.WebApp;
+
+// DOM Elements
+const fullnameElement = document.getElementById('fullname');
+const initialState = document.getElementById('initial-state');
+const resultSection = document.getElementById('result-section');
+const resultMessage = document.getElementById('result-message');
+const actionButtons = document.getElementById('action-buttons');
+const loading = document.getElementById('loading');
+const verifyBtn = document.getElementById('verifyBtn');
+
+// Initialize Telegram WebApp
+tg.ready();
+tg.expand();
+tg.enableClosingConfirmation();
+
 /* Matrix Background */
 const canvas = document.getElementById('matrix-bg');
 const ctx = canvas.getContext('2d');
@@ -651,17 +777,9 @@ for(let i = 0; i < 40; i++){
   particleContainer.appendChild(particle);
 }
 
-/* Telegram WebApp Integration */
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
-tg.enableClosingConfirmation();
-
 // Display user's full name
-const user = tg.initDataUnsafe?.user;
-const fullnameElement = document.getElementById('fullname');
-
 function displayFullName() {
+    const user = tg.initDataUnsafe?.user;
     if (user) {
         let displayName = user.first_name || '';
         if (user.last_name) {
@@ -677,121 +795,49 @@ function displayFullName() {
 }
 displayFullName();
 
-// DOM Elements
-const verifyBtn = document.getElementById('verifyBtn');
-const initialState = document.getElementById('initial-state');
-const resultSection = document.getElementById('result-section');
-const resultMessage = document.getElementById('result-message');
-const actionButtons = document.getElementById('action-buttons');
-const loading = document.getElementById('loading');
-
-// Verification function
-async function verifyMembership() {
-    if (!user || !user.id) {
-        resultMessage.textContent = 'User information not available. Please open this in Telegram.';
-        resultMessage.className = 'result-message error-message';
-        initialState.style.display = 'none';
-        resultSection.style.display = 'block';
-        return;
-    }
-    
-    const token = "{{ token }}";
-    const userId = user.id;
-    
-    // Show loading
-    verifyBtn.disabled = true;
-    verifyBtn.querySelector('.button-text').textContent = 'Checking...';
+function showLoading() {
+    initialState.style.display = 'none';
+    resultSection.style.display = 'none';
     loading.style.display = 'block';
+}
+
+function showResult(message, isSuccess, buttonsHTML) {
+    loading.style.display = 'none';
+    resultMessage.textContent = message;
+    resultMessage.className = isSuccess ? 'result-message success-message' : 'result-message error-message';
+    actionButtons.innerHTML = buttonsHTML;
+    initialState.style.display = 'none';
+    resultSection.style.display = 'flex';
     
-    try {
-        // Call verification API
-        const response = await fetch(`/check_membership/${token}?user_id=${userId}`);
+    // Add event listeners to new buttons
+    setTimeout(() => {
+        const joinNowBtn = document.getElementById('joinNowBtn');
+        const checkAgainBtn = document.getElementById('checkAgainBtn');
+        const retryBtn = document.getElementById('retryBtn');
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        if (joinNowBtn) {
+            joinNowBtn.addEventListener('click', joinGroup);
         }
         
-        const data = await response.json();
-        
-        // Hide loading
-        loading.style.display = 'none';
-        initialState.style.display = 'none';
-        resultSection.style.display = 'block';
-        
-        if (data.is_member) {
-            // User is verified - show success and join button
-            resultMessage.textContent = '✅ Verification Successful! You are a member of the support channel.';
-            resultMessage.className = 'result-message success-message';
-            
-            actionButtons.innerHTML = `
-                <button id="joinNowBtn" class="join-now-button">
-                    <span class="button-text">Join Now</span>
-                </button>
-            `;
-            
-            // Add join button event
-            document.getElementById('joinNowBtn').addEventListener('click', async () => {
-                await joinGroup(token);
-            });
-            
-        } else {
-            // User is not a member - show error and join channel button
-            resultMessage.textContent = '❌ You must join our support channel first to access this content.';
-            resultMessage.className = 'result-message error-message';
-            
-            let buttonsHTML = '';
-            
-            if (data.invite_link) {
-                buttonsHTML += `
-                    <a href="${data.invite_link}" target="_blank" class="join-channel-button">
-                        <span class="button-text">Join Support Channel</span>
-                    </a>
-                `;
-            }
-            
-            buttonsHTML += `
-                <button id="checkAgainBtn" class="check-again-button">
-                    <span class="button-text">Check Again</span>
-                </button>
-            `;
-            
-            actionButtons.innerHTML = buttonsHTML;
-            
-            // Add check again event
-            document.getElementById('checkAgainBtn').addEventListener('click', () => {
-                resultSection.style.display = 'none';
-                initialState.style.display = 'block';
-                verifyBtn.disabled = false;
-                verifyBtn.querySelector('.button-text').textContent = 'Check Membership';
-            });
+        if (checkAgainBtn) {
+            checkAgainBtn.addEventListener('click', resetToInitialState);
         }
         
-    } catch (error) {
-        console.error('Verification error:', error);
-        loading.style.display = 'none';
-        
-        resultMessage.textContent = 'Error verifying membership. Please try again.';
-        resultMessage.className = 'result-message error-message';
-        initialState.style.display = 'none';
-        resultSection.style.display = 'block';
-        
-        actionButtons.innerHTML = `
-            <button id="retryBtn" class="check-again-button">
-                <span class="button-text">Retry</span>
-            </button>
-        `;
-        
-        document.getElementById('retryBtn').addEventListener('click', () => {
-            resultSection.style.display = 'none';
-            initialState.style.display = 'block';
-            verifyBtn.disabled = false;
-            verifyBtn.querySelector('.button-text').textContent = 'Check Membership';
-        });
-    }
+        if (retryBtn) {
+            retryBtn.addEventListener('click', resetToInitialState);
+        }
+    }, 100);
+}
+
+function resetToInitialState() {
+    resultSection.style.display = 'none';
+    initialState.style.display = 'flex';
+    verifyBtn.disabled = false;
+    verifyBtn.querySelector('.button-text').textContent = 'Check Membership';
 }
 
 // Join group function
-async function joinGroup(token) {
+async function joinGroup() {
     const joinBtn = document.getElementById('joinNowBtn');
     if (joinBtn) {
         joinBtn.disabled = true;
@@ -829,6 +875,74 @@ async function joinGroup(token) {
             joinBtn.querySelector('.button-text').textContent = 'Join Now';
         }
         loading.style.display = 'none';
+    }
+}
+
+// Verification function
+async function verifyMembership() {
+    const user = tg.initDataUnsafe?.user;
+    
+    if (!user || !user.id) {
+        showResult('User information not available. Please open this in Telegram.', false, `
+            <button id="retryBtn" class="check-again-button">
+                <span class="button-text">Retry</span>
+            </button>
+        `);
+        return;
+    }
+    
+    const userId = user.id;
+    
+    // Show loading
+    verifyBtn.disabled = true;
+    verifyBtn.querySelector('.button-text').textContent = 'Checking...';
+    showLoading();
+    
+    try {
+        // Call verification API
+        const response = await fetch(`/check_membership/${token}?user_id=${userId}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.is_member) {
+            // User is verified - show success and join button
+            showResult('✅ Verification Successful! You are a member of the support channel.', true, `
+                <button id="joinNowBtn" class="join-now-button">
+                    <span class="button-text">Join Now</span>
+                </button>
+            `);
+        } else {
+            // User is not a member - show error and join channel button
+            let buttonsHTML = '';
+            
+            if (data.invite_link) {
+                buttonsHTML += `
+                    <a href="${data.invite_link}" target="_blank" class="join-channel-button">
+                        <span class="button-text">Join Support Channel</span>
+                    </a>
+                `;
+            }
+            
+            buttonsHTML += `
+                <button id="checkAgainBtn" class="check-again-button">
+                    <span class="button-text">Check Again</span>
+                </button>
+            `;
+            
+            showResult('❌ You must join our support channel first to access this content.', false, buttonsHTML);
+        }
+        
+    } catch (error) {
+        console.error('Verification error:', error);
+        showResult('Error verifying membership. Please try again.', false, `
+            <button id="retryBtn" class="check-again-button">
+                <span class="button-text">Retry</span>
+            </button>
+        `);
     }
 }
 
