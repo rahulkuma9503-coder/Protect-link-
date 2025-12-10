@@ -31,69 +31,6 @@ body{
   overflow-x:hidden;
 }
 
-/* Animated Grid Background */
-#grid-bg{
-  position:fixed;
-  inset:0;
-  background-image:
-    linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px);
-  background-size:50px 50px;
-  animation:gridMove 20s linear infinite;
-  z-index:-10;
-}
-@keyframes gridMove{
-  0%{background-position:0 0}
-  100%{background-position:50px 50px}
-}
-
-/* Matrix Rain */
-#matrix-bg{position:fixed;inset:0;z-index:-9;opacity:0.4}
-
-/* Particles */
-.particles{position:fixed;inset:0;z-index:-8;pointer-events:none;overflow:hidden}
-.particle{position:absolute;width:4px;height:4px;background:var(--neon-cyan);border-radius:50%;animation:float-particle 8s infinite ease-in-out}
-@keyframes float-particle{
-  0%,100%{transform:translateY(0) translateX(0);opacity:0.3}
-  50%{transform:translateY(-100px) translateX(50px);opacity:1}
-}
-
-/* Rotating Rings */
-.ring-container{
-  position:fixed;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  z-index:-7;
-  pointer-events:none;
-  width:100%;
-  height:100%;
-}
-.neon-ring{
-  position:absolute;
-  border-radius:50%;
-  border:2px solid;
-  filter:blur(1px);
-}
-.ring1{width:min(600px, 90vw);height:min(600px, 90vw);border-color:rgba(0,255,255,0.3);animation:spin 20s linear infinite;box-shadow:0 0 40px var(--glow-cyan)}
-.ring2{width:min(450px, 70vw);height:min(450px, 70vw);border-color:rgba(184,0,255,0.3);animation:spin 15s linear infinite reverse;box-shadow:0 0 40px var(--glow-purple)}
-.ring3{width:min(300px, 50vw);height:min(300px, 50vw);border-color:rgba(255,0,255,0.3);animation:spin 25s linear infinite;box-shadow:0 0 40px rgba(255,0,255,0.5)}
-@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
-
-/* Radial Glow */
-.radial-glow{
-  position:fixed;
-  inset:0;
-  background:radial-gradient(circle at center,rgba(0,255,255,0.15) 0%,rgba(184,0,255,0.1) 35%,transparent 70%);
-  z-index:-6;
-  animation:pulse-glow 4s infinite alternate ease-in-out;
-}
-@keyframes pulse-glow{
-  0%{opacity:0.5;transform:scale(0.95)}
-  100%{opacity:1;transform:scale(1.05)}
-}
-
 /* Main Container */
 .container{
   background:linear-gradient(135deg, rgba(0,20,40,0.8) 0%, rgba(20,0,40,0.8) 100%);
@@ -194,33 +131,24 @@ h1{
   100%{filter:drop-shadow(0 0 25px var(--glow-purple))}
 }
 
-/* Subtitle */
+/* Status */
 .status{
-  font-size:clamp(1em, 3vw, 1.3em);
+  font-size:clamp(1.2em, 4vw, 1.5em);
   color:#fff;
-  margin:15px 0 10px 0;
+  margin:20px 0 10px 0;
   font-weight:300;
   letter-spacing:2px;
   text-transform:uppercase;
   position:relative;
   display:inline-block;
+  padding:0 40px;
 }
-.status::before,.status::after{
-  content:'';
-  position:absolute;
-  width:30px;
-  height:2px;
-  background:linear-gradient(90deg, transparent, var(--neon-cyan));
-  top:50%;
-}
-.status::before{left:-40px}
-.status::after{right:-40px;background:linear-gradient(90deg, var(--neon-cyan), transparent)}
 
 /* Full Name Display */
 .fullname-display{
   font-size:clamp(1.2em, 4vw, 1.4em);
   color:var(--neon-cyan);
-  margin:0 0 25px 0;
+  margin:0 0 30px 0;
   font-weight:600;
   letter-spacing:1px;
   text-shadow:0 0 15px var(--glow-cyan);
@@ -230,7 +158,6 @@ h1{
   line-height:1.3;
   padding:0 10px;
   word-wrap:break-word;
-  max-width:100%;
 }
 @keyframes pulse-name{
   0%,100%{opacity:0.8;text-shadow:0 0 10px var(--glow-cyan)}
@@ -255,13 +182,13 @@ h1{
   50%{opacity:1;transform:scaleX(1)}
 }
 
-/* Button */
-.join-button{
-  padding:clamp(16px, 4vw, 20px) clamp(50px, 8vw, 70px);
-  font-size:clamp(1.1em, 3vw, 1.4em);
+/* Join Now Button */
+.join-now-button{
+  padding:clamp(16px, 4vw, 20px) clamp(30px, 6vw, 60px);
+  font-size:clamp(1.1em, 3vw, 1.3em);
   border-radius:50px;
-  border:2px solid var(--neon-cyan);
-  background:linear-gradient(135deg, rgba(0,255,255,0.2), rgba(184,0,255,0.2));
+  border:2px solid #00ff00;
+  background:linear-gradient(135deg, rgba(0,255,0,0.3), rgba(0,128,0,0.3));
   color:#fff;
   cursor:pointer;
   transition:all 0.3s ease;
@@ -272,337 +199,112 @@ h1{
   position:relative;
   overflow:hidden;
   box-shadow:
-    0 0 20px var(--glow-cyan),
-    inset 0 0 20px rgba(0,255,255,0.1);
+    0 0 20px rgba(0,255,0,0.5),
+    inset 0 0 20px rgba(0,255,0,0.1);
   display:inline-block;
   text-decoration:none;
+  margin:10px 5px;
 }
 
-.join-button::before{
-  content:'';
-  position:absolute;
-  top:50%;
-  left:50%;
-  width:0;
-  height:0;
-  border-radius:50%;
-  background:radial-gradient(circle, var(--neon-cyan), transparent);
-  transform:translate(-50%, -50%);
-  transition:width 0.6s, height 0.6s;
-}
-
-.join-button:hover::before{
-  width:300px;
-  height:300px;
-}
-
-.join-button:hover{
-  background:linear-gradient(135deg, rgba(0,255,255,0.4), rgba(184,0,255,0.4));
+.join-now-button:hover{
+  background:linear-gradient(135deg, rgba(0,255,0,0.5), rgba(0,128,0,0.5));
   transform:translateY(-3px) scale(1.05);
   box-shadow:
-    0 0 40px var(--glow-cyan),
-    0 0 60px var(--glow-purple),
+    0 0 40px rgba(0,255,0,0.7),
+    0 0 60px rgba(0,128,0,0.5),
     0 10px 30px rgba(0,0,0,0.5);
-  border-color:var(--neon-purple);
 }
 
-.join-button:active{
-  transform:translateY(0) scale(1);
-}
-
-.join-button:disabled{
+.join-now-button:disabled{
   opacity:0.6;
   cursor:not-allowed;
   transform:none;
 }
 
-.button-text{
-  position:relative;
-  z-index:1;
-}
-
-/* Features */
-.features{
-  display:flex;
-  justify-content:center;
-  gap:clamp(15px, 3vw, 30px);
-  margin-top:25px;
-  font-size:clamp(0.8em, 2vw, 0.95em);
-  color:#aaf;
-  flex-wrap:wrap;
-}
-
-.feature{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-weight:300;
-  letter-spacing:1px;
-}
-
-.feature-icon{
-  width:8px;
-  height:8px;
-  background:var(--neon-cyan);
-  border-radius:50%;
-  box-shadow:0 0 10px var(--glow-cyan);
-  animation:pulse-icon 2s infinite ease-in-out;
-}
-@keyframes pulse-icon{
-  0%,100%{transform:scale(1);opacity:0.7}
-  50%{transform:scale(1.3);opacity:1}
-}
-
 /* Loading Animation */
 .loading{
   display:none;
-  font-size:0.9em;
+  font-size:1em;
   color:#aaf;
-  margin-top:10px;
+  margin:20px 0;
   letter-spacing:1px;
-}
-
-/* Centering Fix */
-.center-fix{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  width:100%;
-  padding:20px 0;
 }
 
 /* Responsive */
 @media(max-width:480px){
-  body{padding:10px}
   .container{padding:30px 20px;border-radius:20px}
-  .status::before,.status::after{width:20px}
-  .status::before{left:-30px}
-  .status::after{right:-30px}
+  .status{padding:0 20px}
 }
 </style>
 </head>
 <body>
 
-<div id="grid-bg"></div>
-<canvas id='matrix-bg'></canvas>
-<div class='particles'></div>
-
-<div class='ring-container'>
-  <div class='neon-ring ring1'></div>
-  <div class='neon-ring ring2'></div>
-  <div class='neon-ring ring3'></div>
-</div>
-
-<div class='radial-glow'></div>
-
-<div class='center-fix'>
-  <div class='container'>
-    <div class='logo-badge'>
-      <img src='https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg' alt='Team Secret Logo'>
-    </div>
-    <h1>TEAM SECRET</h1>
-    <div class='status'>Verifying Identity</div>
-    <div id="fullname" class='fullname-display'>Loading...</div>
-    
-    <div class='scanning'>
-      <div class='scan-line'></div>
-    </div>
-    
-    <button id="joinBtn" class='join-button'>
-      <span class='button-text'>Join Now</span>
-    </button>
-    
-    <div id="loading" class='loading'>Processing your request...</div>
-    
-    <div class='features'>
-      <div class='feature'>
-        <div class='feature-icon'></div>
-        <span>Secure</span>
-      </div>
-      <div class='feature'>
-        <div class='feature-icon'></div>
-        <span>Verified</span>
-      </div>
-      <div class='feature'>
-        <div class='feature-icon'></div>
-        <span>Exclusive</span>
-      </div>
-    </div>
+<div class='container'>
+  <div class='logo-badge'>
+    <img src='https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg' alt='Team Secret Logo'>
   </div>
+  <h1>TEAM SECRET</h1>
+  <div class='status'>Access Granted</div>
+  <div id="fullname" class='fullname-display'>Loading...</div>
+  
+  <div class='scanning'>
+    <div class='scan-line'></div>
+  </div>
+  
+  <button id="joinBtn" class='join-now-button'>
+    <span class='button-text'>Join Now</span>
+  </button>
+  
+  <div id="loading" class='loading'>Opening group...</div>
 </div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-/* Matrix Background */
-const canvas=document.getElementById('matrix-bg');
-const ctx=canvas.getContext('2d');
-function resizeCanvas(){
-  canvas.width=window.innerWidth;
-  canvas.height=window.innerHeight;
-}
-window.addEventListener('resize',resizeCanvas);
-resizeCanvas();
-
-const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*()';
-const arr=chars.split('');
-const fontSize=14;
-let cols=Math.floor(canvas.width/fontSize);
-let drops=new Array(cols).fill(1);
-
-function draw(){
-  ctx.fillStyle='rgba(0,0,0,0.05)';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='rgba(0,255,255,0.5)';
-  ctx.font=fontSize+'px monospace';
-  for(let i=0;i<drops.length;i++){
-    const text=arr[Math.floor(Math.random()*arr.length)];
-    ctx.fillText(text,i*fontSize,drops[i]*fontSize);
-    if(drops[i]*fontSize>canvas.height && Math.random()>0.975) drops[i]=0;
-    drops[i]++;
-  }
-}
-setInterval(draw,40);
-
-/* Floating Particles */
-const particleContainer=document.querySelector('.particles');
-for(let i=0;i<40;i++){
-  let particle=document.createElement('div');
-  particle.classList.add('particle');
-  particle.style.left=Math.random()*100+'%';
-  particle.style.top=Math.random()*100+'%';
-  particle.style.animationDelay=(Math.random()*8)+'s';
-  particle.style.animationDuration=(5+Math.random()*5)+'s';
-  particleContainer.appendChild(particle);
-}
-
-/* Telegram WebApp Integration */
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
-tg.enableClosingConfirmation();
 
-// Display user's full name from Telegram WebApp
 const user = tg.initDataUnsafe?.user;
 const fullnameElement = document.getElementById('fullname');
 
-function displayFullName() {
-    if (user) {
-        // Get first name
-        let displayName = user.first_name || '';
-        
-        // Add last name if available
-        if (user.last_name) {
-            displayName += ' ' + user.last_name;
-        }
-        
-        // If no name at all, fallback
-        if (!displayName.trim()) {
-            displayName = user.username ? `@${user.username}` : 'Welcome!';
-        }
-        
-        fullnameElement.textContent = displayName.trim();
-        console.log('User detected:', user);
-    } else {
-        // Try alternative method
-        try {
-            // If user data not available in initDataUnsafe, check WebApp version
-            if (tg.initData) {
-                const initData = new URLSearchParams(tg.initData);
-                const userStr = initData.get('user');
-                if (userStr) {
-                    const userData = JSON.parse(userStr);
-                    let displayName = userData.first_name || '';
-                    if (userData.last_name) {
-                        displayName += ' ' + userData.last_name;
-                    }
-                    fullnameElement.textContent = displayName.trim() || 'Welcome!';
-                    return;
-                }
-            }
-            
-            // Fallback to query parameters if available
-            const urlParams = new URLSearchParams(window.location.search);
-            const usernameParam = urlParams.get('username');
-            const nameParam = urlParams.get('name');
-            
-            if (nameParam) {
-                fullnameElement.textContent = nameParam;
-            } else if (usernameParam) {
-                fullnameElement.textContent = usernameParam;
-            } else {
-                fullnameElement.textContent = 'Welcome!';
-            }
-        } catch (error) {
-            console.error('Error parsing user data:', error);
-            fullnameElement.textContent = 'Welcome!';
-        }
+if (user) {
+    let displayName = user.first_name || '';
+    if (user.last_name) {
+        displayName += ' ' + user.last_name;
     }
+    fullnameElement.textContent = displayName.trim() || 'User';
 }
 
-// Call function to display name
-displayFullName();
+const token = "{{ token }}";
 
-// Handle join button click
 document.getElementById('joinBtn').addEventListener('click', async () => {
-  const joinBtn = document.getElementById('joinBtn');
-  const btnText = joinBtn.querySelector('.button-text');
-  const loadingElement = document.getElementById('loading');
-  
-  btnText.textContent = 'Loading...';
-  joinBtn.disabled = true;
-  loadingElement.style.display = 'block';
-
-  try {
-    const token = "{{ token }}";
-    const response = await fetch(`/getgrouplink/${token}`);
+    const joinBtn = document.getElementById('joinBtn');
+    const loading = document.getElementById('loading');
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    joinBtn.disabled = true;
+    joinBtn.querySelector('.button-text').textContent = 'Loading...';
+    loading.style.display = 'block';
     
-    const data = await response.json();
-
-    if (data.url) {
-      btnText.textContent = 'Opening...';
-      loadingElement.textContent = 'Redirecting to Telegram...';
-      tg.openTelegramLink(data.url);
-      setTimeout(() => tg.close(), 1500);
-    } else {
-      alert('Error: Could not retrieve the group link.');
-      btnText.textContent = 'Join Now';
-      joinBtn.disabled = false;
-      loadingElement.style.display = 'none';
+    try {
+        const response = await fetch(`/getgrouplink/${token}`);
+        const data = await response.json();
+        
+        if (data.url) {
+            tg.openTelegramLink(data.url);
+            setTimeout(() => tg.close(), 1500);
+        } else {
+            alert('Error: Could not retrieve the group link.');
+            joinBtn.disabled = false;
+            joinBtn.querySelector('.button-text').textContent = 'Join Now';
+            loading.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Join error:', error);
+        alert('An error occurred. Please try again.');
+        joinBtn.disabled = false;
+        joinBtn.querySelector('.button-text').textContent = 'Join Now';
+        loading.style.display = 'none';
     }
-  } catch (error) {
-    console.error('Fetch error:', error);
-    alert('An error occurred. Please try again.');
-    btnText.textContent = 'Join Now';
-    joinBtn.disabled = false;
-    loadingElement.style.display = 'none';
-  }
-});
-
-// Ensure proper centering on load
-window.addEventListener('load', () => {
-  document.body.style.display = 'flex';
-  document.body.style.alignItems = 'center';
-  document.body.style.justifyContent = 'center';
-});
-
-// Handle window resize for better centering
-window.addEventListener('resize', () => {
-  const container = document.querySelector('.container');
-  const bodyHeight = window.innerHeight;
-  const containerHeight = container.offsetHeight;
-  
-  if (containerHeight > bodyHeight * 0.9) {
-    container.style.marginTop = '20px';
-    container.style.marginBottom = '20px';
-  } else {
-    container.style.marginTop = 'auto';
-    container.style.marginBottom = 'auto';
-  }
 });
 </script>
 </body>
