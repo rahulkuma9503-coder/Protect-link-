@@ -33,6 +33,134 @@ body{
   overflow-x:hidden;
 }
 
+/* Animated Grid Background */
+#grid-bg{
+  position:fixed;
+  inset:0;
+  background-image:
+    linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px);
+  background-size:50px 50px;
+  animation:gridMove 20s linear infinite;
+  z-index:-10;
+}
+
+@keyframes gridMove{
+  0%{background-position:0 0}
+  100%{background-position:50px 50px}
+}
+
+/* Matrix Rain */
+#matrix-bg{
+  position:fixed;
+  inset:0;
+  z-index:-9;
+  opacity:0.4;
+}
+
+/* Floating Particles */
+.particles{
+  position:fixed;
+  inset:0;
+  z-index:-8;
+  pointer-events:none;
+  overflow:hidden;
+}
+
+.particle{
+  position:absolute;
+  width:4px;
+  height:4px;
+  background:var(--neon-cyan);
+  border-radius:50%;
+  animation:float-particle 8s infinite ease-in-out;
+}
+
+@keyframes float-particle{
+  0%,100%{
+    transform:translateY(0) translateX(0);
+    opacity:0.3;
+  }
+  50%{
+    transform:translateY(-100px) translateX(50px);
+    opacity:1;
+  }
+}
+
+/* Rotating Rings */
+.ring-container{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:-7;
+  pointer-events:none;
+  width:100%;
+  height:100%;
+}
+
+.neon-ring{
+  position:absolute;
+  border-radius:50%;
+  border:2px solid;
+  filter:blur(1px);
+}
+
+.ring1{
+  width:min(600px, 90vw);
+  height:min(600px, 90vw);
+  border-color:rgba(0,255,255,0.3);
+  animation:spin 20s linear infinite;
+  box-shadow:0 0 40px var(--glow-cyan);
+}
+
+.ring2{
+  width:min(450px, 70vw);
+  height:min(450px, 70vw);
+  border-color:rgba(184,0,255,0.3);
+  animation:spin 15s linear infinite reverse;
+  box-shadow:0 0 40px var(--glow-purple);
+}
+
+.ring3{
+  width:min(300px, 50vw);
+  height:min(300px, 50vw);
+  border-color:rgba(255,0,255,0.3);
+  animation:spin 25s linear infinite;
+  box-shadow:0 0 40px rgba(255,0,255,0.5);
+}
+
+@keyframes spin{
+  0%{transform:rotate(0deg)}
+  100%{transform:rotate(360deg)}
+}
+
+/* Radial Glow */
+.radial-glow{
+  position:fixed;
+  inset:0;
+  background:radial-gradient(
+    circle at center,
+    rgba(0,255,255,0.15) 0%,
+    rgba(184,0,255,0.1) 35%,
+    transparent 70%
+  );
+  z-index:-6;
+  animation:pulse-glow 4s infinite alternate ease-in-out;
+}
+
+@keyframes pulse-glow{
+  0%{
+    opacity:0.5;
+    transform:scale(0.95);
+  }
+  100%{
+    opacity:1;
+    transform:scale(1.05);
+  }
+}
+
 /* Main Container */
 .container{
   background:linear-gradient(135deg, rgba(0,20,40,0.8) 0%, rgba(20,0,40,0.8) 100%);
@@ -43,6 +171,7 @@ body{
   backdrop-filter:blur(20px);
   text-align:center;
   position:relative;
+  animation:float-container 5s ease-in-out infinite alternate;
   box-shadow:
     0 0 60px rgba(0,255,255,0.4),
     0 0 100px rgba(184,0,255,0.3),
@@ -54,6 +183,15 @@ body{
   overflow:hidden;
 }
 
+@keyframes float-container{
+  0%{
+    transform:translateY(0) scale(1);
+  }
+  100%{
+    transform:translateY(-15px) scale(1.02);
+  }
+}
+
 .container::before{
   content:'';
   position:absolute;
@@ -61,10 +199,18 @@ body{
   left:-50%;
   width:200%;
   height:200%;
-  background:conic-gradient(from 0deg, transparent, rgba(0,255,255,0.3), transparent, rgba(184,0,255,0.3), transparent);
+  background:conic-gradient(
+    from 0deg,
+    transparent,
+    rgba(0,255,255,0.3),
+    transparent,
+    rgba(184,0,255,0.3),
+    transparent
+  );
   animation:rotate-border 6s linear infinite;
   z-index:-1;
 }
+
 @keyframes rotate-border{
   0%{transform:rotate(0deg)}
   100%{transform:rotate(360deg)}
@@ -80,9 +226,39 @@ body{
   display:flex;
   align-items:center;
   justify-content:center;
-  box-shadow:0 0 30px var(--glow-cyan), 0 0 50px var(--glow-purple);
+  box-shadow:
+    0 0 30px var(--glow-cyan),
+    0 0 50px var(--glow-purple);
+  animation:pulse-badge 2s infinite ease-in-out;
   position:relative;
   padding:5px;
+}
+
+@keyframes pulse-badge{
+  0%,100%{
+    transform:scale(1);
+    box-shadow:
+      0 0 30px var(--glow-cyan),
+      0 0 50px var(--glow-purple);
+  }
+  50%{
+    transform:scale(1.1);
+    box-shadow:
+      0 0 50px var(--glow-cyan),
+      0 0 70px var(--glow-purple),
+      0 0 90px rgba(255,0,255,0.3);
+  }
+}
+
+.logo-badge::before{
+  content:'';
+  position:absolute;
+  inset:-5px;
+  border-radius:50%;
+  border:2px solid transparent;
+  border-top-color:var(--neon-cyan);
+  border-right-color:var(--neon-purple);
+  animation:spin 3s linear infinite;
 }
 
 .logo-badge img{
@@ -104,7 +280,17 @@ h1{
   margin:0 0 15px 0;
   letter-spacing:4px;
   text-shadow:0 0 30px var(--glow-cyan);
+  animation:glow-title 3s infinite alternate ease-in-out;
   line-height:1.2;
+}
+
+@keyframes glow-title{
+  0%{
+    filter:drop-shadow(0 0 10px var(--glow-cyan));
+  }
+  100%{
+    filter:drop-shadow(0 0 25px var(--glow-purple));
+  }
 }
 
 /* Status */
@@ -120,6 +306,24 @@ h1{
   padding:0 40px;
 }
 
+.status::before, .status::after{
+  content:'';
+  position:absolute;
+  width:30px;
+  height:2px;
+  background:linear-gradient(90deg, transparent, var(--neon-cyan));
+  top:50%;
+}
+
+.status::before{
+  left:0;
+}
+
+.status::after{
+  right:0;
+  background:linear-gradient(90deg, var(--neon-cyan), transparent);
+}
+
 /* Full Name Display */
 .fullname-display{
   font-size:clamp(1.2em, 4vw, 1.4em);
@@ -129,10 +333,24 @@ h1{
   letter-spacing:1px;
   text-shadow:0 0 15px var(--glow-cyan);
   font-family:'Orbitron', sans-serif;
+  animation:pulse-name 3s infinite ease-in-out;
   min-height:30px;
   line-height:1.3;
   padding:0 10px;
   word-wrap:break-word;
+}
+
+@keyframes pulse-name{
+  0%,100%{
+    opacity:0.8;
+    text-shadow:0 0 10px var(--glow-cyan);
+  }
+  50%{
+    opacity:1;
+    text-shadow:
+      0 0 20px var(--glow-cyan),
+      0 0 10px var(--glow-purple);
+  }
 }
 
 /* Scanning Animation */
@@ -141,6 +359,7 @@ h1{
   padding:8px 0;
   margin:20px 0;
 }
+
 .scan-line{
   width:100%;
   height:2px;
@@ -148,9 +367,16 @@ h1{
   animation:scan 2s infinite ease-in-out;
   box-shadow:0 0 10px var(--glow-cyan);
 }
+
 @keyframes scan{
-  0%,100%{opacity:0.3;transform:scaleX(0.5)}
-  50%{opacity:1;transform:scaleX(1)}
+  0%,100%{
+    opacity:0.3;
+    transform:scaleX(0.5);
+  }
+  50%{
+    opacity:1;
+    transform:scaleX(1);
+  }
 }
 
 /* Buttons */
@@ -177,6 +403,24 @@ h1{
   margin:10px 5px;
 }
 
+.verify-button::before, .join-channel-button::before, .join-now-button::before, .check-again-button::before{
+  content:'';
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:0;
+  height:0;
+  border-radius:50%;
+  background:radial-gradient(circle, var(--neon-cyan), transparent);
+  transform:translate(-50%, -50%);
+  transition:width 0.6s, height 0.6s;
+}
+
+.verify-button:hover::before, .join-channel-button:hover::before, .join-now-button:hover::before, .check-again-button:hover::before{
+  width:300px;
+  height:300px;
+}
+
 .verify-button:hover, .join-channel-button:hover, .join-now-button:hover, .check-again-button:hover{
   background:linear-gradient(135deg, rgba(0,255,255,0.4), rgba(184,0,255,0.4));
   transform:translateY(-3px) scale(1.05);
@@ -185,6 +429,10 @@ h1{
     0 0 60px var(--glow-purple),
     0 10px 30px rgba(0,0,0,0.5);
   border-color:var(--neon-purple);
+}
+
+.verify-button:active, .join-channel-button:active, .join-now-button:active, .check-again-button:active{
+  transform:translateY(0) scale(1);
 }
 
 .verify-button:disabled, .join-now-button:disabled{
@@ -225,6 +473,18 @@ h1{
   border-radius:10px;
   background:rgba(0,0,0,0.3);
   border-left:3px solid var(--neon-cyan);
+  animation:fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn{
+  from{
+    opacity:0;
+    transform:translateY(-10px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0);
+  }
 }
 
 .success-message{
@@ -244,6 +504,12 @@ h1{
   color:#aaf;
   margin:20px 0;
   letter-spacing:1px;
+  animation:pulse-loading 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-loading{
+  0%,100%{opacity:0.5}
+  50%{opacity:1}
 }
 
 /* Button Container */
@@ -252,17 +518,59 @@ h1{
   flex-direction:column;
   gap:15px;
   margin:30px 0;
+  animation:fadeIn 0.5s ease-out;
+}
+
+/* Feature Icons */
+.feature-icon{
+  width:8px;
+  height:8px;
+  background:var(--neon-cyan);
+  border-radius:50%;
+  box-shadow:0 0 10px var(--glow-cyan);
+  animation:pulse-icon 2s infinite ease-in-out;
+}
+
+@keyframes pulse-icon{
+  0%,100%{
+    transform:scale(1);
+    opacity:0.7;
+  }
+  50%{
+    transform:scale(1.3);
+    opacity:1;
+  }
 }
 
 /* Responsive */
 @media(max-width:480px){
-  .container{padding:30px 20px;border-radius:20px}
+  body{padding:10px}
+  .container{
+    padding:30px 20px;
+    border-radius:20px;
+  }
   .status{padding:0 20px}
   .button-container{gap:10px}
+  .verify-button, .join-channel-button, .join-now-button, .check-again-button{
+    padding:15px 30px;
+    font-size:1.1em;
+  }
 }
 </style>
 </head>
 <body>
+
+<div id="grid-bg"></div>
+<canvas id='matrix-bg'></canvas>
+<div class='particles'></div>
+
+<div class='ring-container'>
+  <div class='neon-ring ring1'></div>
+  <div class='neon-ring ring2'></div>
+  <div class='neon-ring ring3'></div>
+</div>
+
+<div class='radial-glow'></div>
 
 <div class='container'>
   <div class='logo-badge'>
@@ -295,6 +603,54 @@ h1{
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
+/* Matrix Background */
+const canvas = document.getElementById('matrix-bg');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*()';
+const arr = chars.split('');
+const fontSize = 14;
+let cols = Math.floor(canvas.width / fontSize);
+let drops = new Array(cols).fill(1);
+
+function drawMatrix() {
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(0,255,255,0.5)';
+  ctx.font = fontSize + 'px monospace';
+  
+  for (let i = 0; i < drops.length; i++) {
+    const text = arr[Math.floor(Math.random() * arr.length)];
+    ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+    if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+      drops[i] = 0;
+    }
+    drops[i]++;
+  }
+}
+
+// Start matrix animation
+const matrixInterval = setInterval(drawMatrix, 40);
+
+/* Floating Particles */
+const particleContainer = document.querySelector('.particles');
+for(let i = 0; i < 40; i++){
+  let particle = document.createElement('div');
+  particle.classList.add('particle');
+  particle.style.left = Math.random() * 100 + '%';
+  particle.style.top = Math.random() * 100 + '%';
+  particle.style.animationDelay = (Math.random() * 8) + 's';
+  particle.style.animationDuration = (5 + Math.random() * 5) + 's';
+  particleContainer.appendChild(particle);
+}
+
 /* Telegram WebApp Integration */
 const tg = window.Telegram.WebApp;
 tg.ready();
@@ -478,6 +834,11 @@ async function joinGroup(token) {
 
 // Event listener for verify button
 verifyBtn.addEventListener('click', verifyMembership);
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+    clearInterval(matrixInterval);
+});
 </script>
 </body>
 </html>
