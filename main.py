@@ -141,15 +141,40 @@ def get_support_channels() -> List[str]:
 def format_channel_name(channel_id: str) -> str:
     """Format channel ID for display."""
     if channel_id.startswith('@'):
-        return channel_id[1:]
+        return channel_id[1:].replace('_', ' ').title()
     elif channel_id.startswith('-100'):
-        # Show last 6 characters for private channels
-        return f"Channel {channel_id[-6:]}"
+        # Private channel - try to get name from database or show as "Private Channel"
+        channel_data = channels_collection.find_one({"channel_id": channel_id})
+        if channel_data and channel_data.get("title"):
+            return channel_data["title"]
+        else:
+            return f"Private Channel ({channel_id[-6:]})"
     elif channel_id.startswith('-'):
-        # For other negative IDs
-        return f"Channel {channel_id}"
+        # Other private chat
+        return f"Chat {channel_id}"
     else:
         return channel_id
+
+async def get_channel_title(bot, channel_id: str) -> str:
+    """Get the actual title/name of a channel."""
+    try:
+        # Convert channel_id to appropriate format
+        try:
+            chat_id = int(channel_id)
+        except ValueError:
+            if channel_id.startswith('@'):
+                chat_id = channel_id
+            else:
+                chat_id = f"@{channel_id}"
+        
+        # Get chat information
+        chat = await bot.get_chat(chat_id)
+        
+        # Return the title
+        return chat.title or format_channel_name(channel_id)
+    except Exception as e:
+        logger.error(f"Failed to get channel title for {channel_id}: {e}")
+        return format_channel_name(channel_id)
 
 async def get_channel_invite_links(context: ContextTypes.DEFAULT_TYPE, channels: List[str]) -> List[Dict[str, str]]:
     """Get invite links for multiple channels."""
@@ -251,7 +276,7 @@ async def verify_user_membership(user_id: int) -> bool:
         return False
 
 async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
-    """Get channel information including membership status and invite links."""
+    """Get channel information including membership status and invite links WITH CHANNEL TITLES."""
     support_channels = get_support_channels()
     if not support_channels:
         return {
@@ -287,16 +312,18 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                     else:
                         chat_id = f"@{channel}"
                 
-                # Get chat info and invite link
+                # Get chat info and title
                 try:
                     chat = await bot.get_chat(chat_id)
-                    invite_link = None
+                    chat_title = chat.title or format_channel_name(channel)
+                    chat_username = getattr(chat, 'username', None)
                     
-                    # Try to get existing invite link
+                    # Get or create invite link
+                    invite_link = None
                     if chat.invite_link:
                         invite_link = chat.invite_link
-                    elif chat.username:
-                        invite_link = f"https://t.me/{chat.username}"
+                    elif chat_username:
+                        invite_link = f"https://t.me/{chat_username}"
                     else:
                         # Try to create one
                         try:
@@ -313,8 +340,21 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                                 invite_link = f"https://t.me/{channel[1:]}"
                             else:
                                 invite_link = f"https://t.me/{channel}"
+                    
+                    # Update channel title in database
+                    channels_collection.update_one(
+                        {"channel_id": channel},
+                        {"$set": {
+                            "title": chat_title,
+                            "username": chat_username,
+                            "last_updated": datetime.datetime.now()
+                        }},
+                        upsert=True
+                    )
+                    
                 except Exception as e:
                     logger.error(f"Failed to get chat info for {channel}: {e}")
+                    chat_title = format_channel_name(channel)
                     # Generate fallback link
                     if channel.startswith('-100'):
                         invite_link = f"https://t.me/c/{channel[4:]}"
@@ -336,14 +376,25 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                 
                 channels_info.append({
                     "channel": channel,
+                    "channel_title": chat_title,  # Actual channel title
                     "invite_link": invite_link,
                     "is_member": is_channel_member,
-                    "display_name": format_channel_name(channel)
+                    "display_name": chat_title,  # Use actual title for display
+                    "username": chat_username if 'chat_username' in locals() else None
                 })
                 
             except Exception as e:
                 logger.error(f"Error processing channel {channel}: {e}")
-                continue
+                # Fallback with basic info
+                chat_title = format_channel_name(channel)
+                channels_info.append({
+                    "channel": channel,
+                    "channel_title": chat_title,
+                    "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
+                    "is_member": False,
+                    "display_name": chat_title
+                })
+                is_member = False
         
         # Get the first channel's invite link as the primary one
         primary_invite_link = channels_info[0]["invite_link"] if channels_info else None
@@ -357,11 +408,23 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Bot initialization error: {e}")
+        # Fallback response
+        fallback_channels = []
+        for channel in support_channels:
+            chat_title = format_channel_name(channel)
+            fallback_channels.append({
+                "channel": channel,
+                "channel_title": chat_title,
+                "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
+                "is_member": False,
+                "display_name": chat_title
+            })
+        
         return {
             "is_member": False,
-            "channels": [],
+            "channels": fallback_channels,
             "channel_count": len(support_channels),
-            "invite_link": None
+            "invite_link": fallback_channels[0]["invite_link"] if fallback_channels else None
         }
 
 # --- Telegram Bot Logic ---
@@ -1081,13 +1144,23 @@ async def on_startup():
     bot_info = await telegram_bot_app.bot.get_me()
     logger.info(f"Bot: @{bot_info.username}")
     
-    # Test channel link generation
+    # Test channel link generation and get channel titles
     support_channels = get_support_channels()
     if support_channels:
         for channel in support_channels:
             try:
                 invite_link = await get_channel_invite_link(telegram_bot_app, channel)
-                logger.info(f"Support channel {channel} invite link: {invite_link}")
+                # Try to get channel title
+                try:
+                    if channel.startswith('@'):
+                        chat_id = channel
+                    else:
+                        chat_id = int(channel)
+                    
+                    chat = await telegram_bot_app.bot.get_chat(chat_id)
+                    logger.info(f"Support channel: {chat.title or channel} - Invite: {invite_link}")
+                except:
+                    logger.info(f"Support channel: {channel} - Invite: {invite_link}")
             except Exception as e:
                 logger.error(f"Failed to generate channel link for {channel}: {e}")
 
@@ -1125,12 +1198,12 @@ async def check_membership_api(token: str, user_id: int):
     if not link_data:
         raise HTTPException(status_code=404, detail="Link not found")
     
-    # Get channel membership info
+    # Get channel membership info WITH CHANNEL TITLES
     channel_info = await get_channel_info_for_user(user_id)
     
     return {
         "is_member": channel_info["is_member"],
-        "channels": channel_info["channels"],
+        "channels": channel_info["channels"],  # Now includes channel_title
         "channel_count": channel_info["channel_count"],
         "invite_link": channel_info["invite_link"]
     }
