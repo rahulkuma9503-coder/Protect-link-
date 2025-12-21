@@ -580,6 +580,8 @@ h1{
   color: white;
   font-size: 1.1em;
   margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .channel-id {
@@ -1096,20 +1098,24 @@ function updateProgress(joinedCount, totalCount) {
     }
 }
 
-function getChannelLogo(channelName) {
+function getChannelLogo(channelTitle) {
     // Default Telegram logo
     let logo = 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg';
     
-    // You can add custom logos for specific channels here
+    // Custom logos for specific channel names
     const channelLogos = {
-        '@example': 'https://example.com/logo.png',
-        // Add more channel logos as needed
+        'team secret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
+        'teamsecret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
+        'crypto': 'https://cdn-icons-png.flaticon.com/512/6001/6001536.png',
+        'news': 'https://cdn-icons-png.flaticon.com/512/2965/2965879.png',
+        'announcements': 'https://cdn-icons-png.flaticon.com/512/3095/3095583.png'
     };
     
-    // Check if we have a custom logo for this channel
-    for (const [key, value] of Object.entries(channelLogos)) {
-        if (channelName.includes(key)) {
-            return value;
+    // Check if we have a custom logo for this channel by name
+    const channelLower = channelTitle.toLowerCase();
+    for (const [key, logoUrl] of Object.entries(channelLogos)) {
+        if (channelLower.includes(key)) {
+            return logoUrl;
         }
     }
     
@@ -1117,12 +1123,13 @@ function getChannelLogo(channelName) {
 }
 
 function formatChannelName(channel) {
+    // Fallback function to format channel ID if display_name is not available
     if (channel.startsWith('@')) {
-        return channel.substring(1);
+        return channel.substring(1).replace(/_/g, ' ').toUpperCase();
     } else if (channel.startsWith('-100')) {
-        return `Channel ${channel.substring(0, 10)}...`;
+        return `PRIVATE CHANNEL (${channel.slice(-6)})`;
     } else {
-        return channel;
+        return channel.toUpperCase();
     }
 }
 
@@ -1138,7 +1145,8 @@ function createChannelsList(channels) {
     
     channels.forEach((channel, index) => {
         const channelItem = document.createElement('div');
-        const channelName = formatChannelName(channel.channel);
+        // Use channel_title from backend, fallback to display_name, then format channel ID
+        const channelTitle = channel.channel_title || channel.display_name || formatChannelName(channel.channel);
         const isJoined = channel.is_member || false;
         
         if (isJoined) joinedCount++;
@@ -1146,9 +1154,9 @@ function createChannelsList(channels) {
         channelItem.className = `channel-item ${isJoined ? 'joined' : 'not-joined'}`;
         channelItem.innerHTML = `
             <div class="channel-info">
-                <img src="${getChannelLogo(channel.channel)}" alt="${channelName}" class="channel-logo">
+                <img src="${getChannelLogo(channelTitle)}" alt="${channelTitle}" class="channel-logo">
                 <div class="channel-details">
-                    <div class="channel-name">${channelName}</div>
+                    <div class="channel-name">${channelTitle}</div>
                     <div class="channel-id">${channel.channel}</div>
                 </div>
             </div>
@@ -1341,14 +1349,14 @@ async function verifyMembership() {
         if (data.is_member) {
             // User is verified - show success
             const channelCount = data.channel_count || data.channels?.length || 0;
-            showResult(`✅ Verification Successful! You have joined all ${channelCount} required channels.`, true, data.channels || [], channelCount);
+            showResult(`✅ VERIFICATION SUCCESSFUL! You have joined all ${channelCount} required channels.`, true, data.channels || [], channelCount);
         } else {
             // User is not a member of all channels
             const channelCount = data.channel_count || data.channels?.length || 0;
-            let message = `❌ You need to join ${channelCount} channel(s) to access this content.`;
+            let message = `❌ ACCESS DENIED! You need to join ${channelCount} channel(s) to access this content.`;
             
             if (channelCount > 1) {
-                message = `❌ You need to join all ${channelCount} channels to access this content.`;
+                message = `❌ ACCESS DENIED! You need to join all ${channelCount} channels to access this content.`;
             }
             
             showResult(message, false, data.channels || [], channelCount);
@@ -1356,7 +1364,7 @@ async function verifyMembership() {
         
     } catch (error) {
         console.error('Verification error:', error);
-        showResult('Error verifying membership. Please try again.', false, [], 0);
+        showResult('❌ ERROR: Failed to verify membership. Please try again.', false, [], 0);
     }
 }
 
