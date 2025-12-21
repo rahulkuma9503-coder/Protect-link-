@@ -4,7 +4,7 @@ import uuid
 import base64
 import asyncio
 import datetime
-from typing import Optional
+from typing import Optional, List
 from pymongo import MongoClient
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.templating import Jinja2Templates
@@ -126,33 +126,48 @@ async def get_channel_invite_link(context: ContextTypes.DEFAULT_TYPE, channel_id
         else:
             return f"https://t.me/{channel_id}"
 
+def get_support_channels() -> List[str]:
+    """Get list of support channels from environment variable."""
+    support_channels_str = os.environ.get("SUPPORT_CHANNELS", "").strip()
+    if not support_channels_str:
+        return []
+    
+    # Split by comma and strip whitespace
+    channels = [ch.strip() for ch in support_channels_str.split(",") if ch.strip()]
+    return channels
+
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if user is member of the support channel."""
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    if not support_channel:
+    """Check if user is member of ALL support channels."""
+    support_channels = get_support_channels()
+    if not support_channels:
         return True
     
-    try:
+    for channel in support_channels:
         try:
-            chat_id = int(support_channel)
-        except ValueError:
-            if support_channel.startswith('@'):
-                chat_id = support_channel
-            else:
-                chat_id = f"@{support_channel}"
-        
-        chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-        return chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-    except Exception as e:
-        logger.error(f"❌ Channel check error: {e}")
-        return False
+            try:
+                chat_id = int(channel)
+            except ValueError:
+                if channel.startswith('@'):
+                    chat_id = channel
+                else:
+                    chat_id = f"@{channel}"
+            
+            chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if chat_member.status not in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                logger.info(f"User {user_id} is not member of {channel}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Channel check error for {channel}: {e}")
+            return False
+    
+    return True
 
 async def verify_user_membership(user_id: int) -> bool:
-    """Check if user is member of support channel without context."""
+    """Check if user is member of ALL support channels without context."""
     from telegram import Bot
     
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    if not support_channel:
+    support_channels = get_support_channels()
+    if not support_channels:
         return True
     
     try:
@@ -163,20 +178,29 @@ async def verify_user_membership(user_id: int) -> bool:
         # Create a bot instance
         bot = Bot(token=bot_token)
         
-        try:
-            chat_id = int(support_channel)
-        except ValueError:
-            if support_channel.startswith('@'):
-                chat_id = support_channel
-            else:
-                chat_id = f"@{support_channel}"
-        
-        try:
-            chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-            return chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-        except Exception as e:
-            logger.error(f"Channel check error: {e}")
-            return False
+        for channel in support_channels:
+            try:
+                try:
+                    chat_id = int(channel)
+                except ValueError:
+                    if channel.startswith('@'):
+                        chat_id = channel
+                    else:
+                        chat_id = f"@{channel}"
+                
+                try:
+                    chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+                    if chat_member.status not in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                        logger.info(f"User {user_id} is not member of {channel}")
+                        return False
+                except Exception as e:
+                    logger.error(f"Channel check error for {channel}: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error processing channel {channel}: {e}")
+                return False
+                
+        return True
     except Exception as e:
         logger.error(f"Bot initialization error: {e}")
         return False
@@ -202,10 +226,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # First check channel membership regardless of args
     if not await check_channel_membership(user_id, context):
-        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-        if support_channel:
-            # Get channel invite link
-            invite_link = await get_channel_invite_link(context, support_channel)
+        support_channels = get_support_channels()
+        if support_channels:
+            # Create buttons for each channel
+            keyboard = []
+            for channel in support_channels:
+                invite_link = await get_channel_invite_link(context, channel)
+                # Extract channel name for display
+                if channel.startswith('@'):
+                    display_name = channel[1:]
+                elif channel.startswith('-100'):
+                    display_name = f"Channel {channel}"
+                else:
+                    display_name = channel
+                
+                keyboard.append([InlineKeyboardButton(f"📢 Join {display_name}", url=invite_link)])
             
             # If there's a protected link argument, include it in callback data
             if context.args:
@@ -214,22 +249,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 callback_data = "check_join"
             
-            keyboard = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                [InlineKeyboardButton("✅ Check", callback_data=callback_data)]
-            ]
+            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            channel_count = len(support_channels)
             if context.args:
                 message_text = (
-                    "🔐 *This is a Protected Link*\n\n"
-                    "Join our channel first to access this link.\n"
-                    "Then click 'Check' below."
+                    f"🔐 *This is a Protected Link*\n\n"
+                    f"Join {channel_count} channel(s) first to access this link.\n"
+                    f"Then click 'Check Membership' below."
                 )
             else:
                 message_text = (
-                    "🔐 Join our channel first to use this bot.\n"
-                    "Then click 'Check' below."
+                    f"🔐 Join {channel_count} channel(s) first to use this bot.\n"
+                    "Then click 'Check Membership' below."
                 )
             
             await update.message.reply_text(
@@ -239,7 +272,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
     
-    # User is in channel or no channel required
+    # User is in all channels or no channels required
     
     # Check if this is a protected link (has argument)
     if context.args:
@@ -284,13 +317,20 @@ I help you keep your channel links safe & secure.
 • 🛡️ Anti-Forward Protection
 • 🎯 Easy to use UI""".format(username=user_name)
     
-    # Create keyboard with support channel button
+    # Create keyboard with support channel buttons
     keyboard = []
     
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    if support_channel:
-        invite_link = await get_channel_invite_link(context, support_channel)
-        keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
+    support_channels = get_support_channels()
+    if support_channels:
+        for channel in support_channels:
+            invite_link = await get_channel_invite_link(context, channel)
+            if channel.startswith('@'):
+                display_name = channel[1:]
+            elif channel.startswith('-100'):
+                display_name = f"Channel {channel}"
+            else:
+                display_name = channel
+            keyboard.append([InlineKeyboardButton(f"🌟 {display_name}", url=invite_link)])
     
     keyboard.append([InlineKeyboardButton("🚀 Create Protected Link", callback_data="create_link")])
     
@@ -311,7 +351,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "Use /help for commands."
             )
         else:
-            await query.answer("❌ Not joined yet. Please join first.", show_alert=True)
+            await query.answer("❌ Not joined all channels yet. Please join all channels first.", show_alert=True)
     
     elif query.data.startswith("check_join_"):
         # Handle check join for protected links
@@ -335,7 +375,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             else:
                 await query.message.edit_text("❌ Link expired or revoked")
         else:
-            await query.answer("❌ Not joined yet. Please join first.", show_alert=True)
+            await query.answer("❌ Not joined all channels yet. Please join all channels first.", show_alert=True)
     
     elif query.data == "create_link":
         await query.message.reply_text(
@@ -359,18 +399,27 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Create protected link for ANY Telegram link (group or channel)."""
     # Check channel membership
     if not await check_channel_membership(update.effective_user.id, context):
-        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-        if support_channel:
-            invite_link = await get_channel_invite_link(context, support_channel)
-            keyboard = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
-            ]
+        support_channels = get_support_channels()
+        if support_channels:
+            # Create buttons for each channel
+            keyboard = []
+            for channel in support_channels:
+                invite_link = await get_channel_invite_link(context, channel)
+                if channel.startswith('@'):
+                    display_name = channel[1:]
+                elif channel.startswith('-100'):
+                    display_name = f"Channel {channel}"
+                else:
+                    display_name = channel
+                keyboard.append([InlineKeyboardButton(f"📢 Join {display_name}", url=invite_link)])
+            
+            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            channel_count = len(support_channels)
             await update.message.reply_text(
-                "🔐 Join our channel first to use this bot.\n"
-                "Then click 'Check' below.",
+                f"🔐 Join {channel_count} channel(s) first to use this bot.\n"
+                "Then click 'Check Membership' below.",
                 reply_markup=reply_markup
             )
         return
@@ -444,18 +493,27 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Revoke a link."""
     # Check channel membership
     if not await check_channel_membership(update.effective_user.id, context):
-        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-        if support_channel:
-            invite_link = await get_channel_invite_link(context, support_channel)
-            keyboard = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
-            ]
+        support_channels = get_support_channels()
+        if support_channels:
+            # Create buttons for each channel
+            keyboard = []
+            for channel in support_channels:
+                invite_link = await get_channel_invite_link(context, channel)
+                if channel.startswith('@'):
+                    display_name = channel[1:]
+                elif channel.startswith('-100'):
+                    display_name = f"Channel {channel}"
+                else:
+                    display_name = channel
+                keyboard.append([InlineKeyboardButton(f"📢 Join {display_name}", url=invite_link)])
+            
+            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            channel_count = len(support_channels)
             await update.message.reply_text(
-                "🔐 Join our channel first to use this bot.\n"
-                "Then click 'Check' below.",
+                f"🔐 Join {channel_count} channel(s) first to use this bot.\n"
+                "Then click 'Check Membership' below.",
                 reply_markup=reply_markup
             )
         return
@@ -721,28 +779,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Check channel membership
     if not await check_channel_membership(user_id, context):
-        support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-        if support_channel:
-            invite_link = await get_channel_invite_link(context, support_channel)
-            keyboard = [
-                [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                [InlineKeyboardButton("✅ Check", callback_data="check_join")]
-            ]
+        support_channels = get_support_channels()
+        if support_channels:
+            # Create buttons for each channel
+            keyboard = []
+            for channel in support_channels:
+                invite_link = await get_channel_invite_link(context, channel)
+                if channel.startswith('@'):
+                    display_name = channel[1:]
+                elif channel.startswith('-100'):
+                    display_name = f"Channel {channel}"
+                else:
+                    display_name = channel
+                keyboard.append([InlineKeyboardButton(f"📢 Join {display_name}", url=invite_link)])
+            
+            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            channel_count = len(support_channels)
             await update.message.reply_text(
-                "🔐 Join our channel first to use this bot.\n"
-                "Then click 'Check' below.",
+                f"🔐 Join {channel_count} channel(s) first to use this bot.\n"
+                "Then click 'Check Membership' below.",
                 reply_markup=reply_markup
             )
         return
     
     keyboard = []
     
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    if support_channel:
-        invite_link = await get_channel_invite_link(context, support_channel)
-        keyboard.append([InlineKeyboardButton("🌟 Support Channel", url=invite_link)])
+    support_channels = get_support_channels()
+    if support_channels:
+        for channel in support_channels:
+            invite_link = await get_channel_invite_link(context, channel)
+            if channel.startswith('@'):
+                display_name = channel[1:]
+            elif channel.startswith('-100'):
+                display_name = f"Channel {channel}"
+            else:
+                display_name = channel
+            keyboard.append([InlineKeyboardButton(f"🌟 {display_name}", url=invite_link)])
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
@@ -767,7 +841,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Works with any t.me link\n"
         "• Monitor link analytics\n"
         "• Revoke unused links\n"
-        "• Join our support channel",
+        "• Join our support channels",
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
@@ -822,13 +896,14 @@ async def on_startup():
     logger.info(f"Bot: @{bot_info.username}")
     
     # Test channel link generation
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    if support_channel:
-        try:
-            invite_link = await get_channel_invite_link(telegram_bot_app, support_channel)
-            logger.info(f"Support channel invite link: {invite_link}")
-        except Exception as e:
-            logger.error(f"Failed to generate channel link: {e}")
+    support_channels = get_support_channels()
+    if support_channels:
+        for channel in support_channels:
+            try:
+                invite_link = await get_channel_invite_link(telegram_bot_app, channel)
+                logger.info(f"Support channel {channel} invite link: {invite_link}")
+            except Exception as e:
+                logger.error(f"Failed to generate channel link for {channel}: {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -858,7 +933,7 @@ async def verify_page(request: Request, token: str):
 
 @app.get("/check_membership/{token}")
 async def check_membership_api(token: str, user_id: int):
-    """API to check if user is member of support channel."""
+    """API to check if user is member of support channels."""
     # First check if token is valid
     link_data = links_collection.find_one({"_id": token, "active": True})
     if not link_data:
@@ -867,54 +942,65 @@ async def check_membership_api(token: str, user_id: int):
     # Check membership
     is_member = await verify_user_membership(user_id)
     
-    # Get support channel info
-    support_channel = os.environ.get("SUPPORT_CHANNEL", "").strip()
-    invite_link = None
+    # Get support channels info
+    support_channels = get_support_channels()
+    channels_info = []
     
-    if support_channel and not is_member:
-        # Get invite link
+    if support_channels and not is_member:
+        # Get invite links for all channels
         try:
             from telegram import Bot
             bot_token = os.environ.get("TELEGRAM_TOKEN")
             if bot_token:
                 bot = Bot(token=bot_token)
                 
-                try:
-                    chat_id = int(support_channel)
-                except ValueError:
-                    if support_channel.startswith('@'):
-                        chat_id = support_channel
-                    else:
-                        chat_id = f"@{support_channel}"
-                
-                try:
-                    # Try to get existing invite link
-                    chat = await bot.get_chat(chat_id)
-                    if chat.invite_link:
-                        invite_link = chat.invite_link
-                    elif chat.username:
-                        invite_link = f"https://t.me/{chat.username}"
-                    else:
-                        # Try to create one
-                        invite = await bot.create_chat_invite_link(
-                            chat_id=chat_id,
-                            creates_join_request=True,
-                            name="Bot Access Link"
-                        )
-                        invite_link = invite.invite_link
-                except Exception as e:
-                    logger.error(f"Failed to get invite link: {e}")
-                    if support_channel.startswith('-100'):
-                        invite_link = f"https://t.me/c/{support_channel[4:]}"
-                    elif support_channel.startswith('@'):
-                        invite_link = f"https://t.me/{support_channel[1:]}"
+                for channel in support_channels:
+                    try:
+                        try:
+                            chat_id = int(channel)
+                        except ValueError:
+                            if channel.startswith('@'):
+                                chat_id = channel
+                            else:
+                                chat_id = f"@{channel}"
+                        
+                        try:
+                            # Try to get existing invite link
+                            chat = await bot.get_chat(chat_id)
+                            if chat.invite_link:
+                                invite_link = chat.invite_link
+                            elif chat.username:
+                                invite_link = f"https://t.me/{chat.username}"
+                            else:
+                                # Try to create one
+                                invite = await bot.create_chat_invite_link(
+                                    chat_id=chat_id,
+                                    creates_join_request=True,
+                                    name="Bot Access Link"
+                                )
+                                invite_link = invite.invite_link
+                        except Exception as e:
+                            logger.error(f"Failed to get invite link for {channel}: {e}")
+                            if channel.startswith('-100'):
+                                invite_link = f"https://t.me/c/{channel[4:]}"
+                            elif channel.startswith('@'):
+                                invite_link = f"https://t.me/{channel[1:]}"
+                            else:
+                                invite_link = f"https://t.me/{channel}"
+                        
+                        channels_info.append({
+                            "channel": channel,
+                            "invite_link": invite_link
+                        })
+                    except Exception as e:
+                        logger.error(f"Error processing channel {channel}: {e}")
         except Exception as e:
-            logger.error(f"Error getting invite link: {e}")
+            logger.error(f"Error getting invite links: {e}")
     
     return {
         "is_member": is_member,
-        "invite_link": invite_link,
-        "support_channel": support_channel
+        "channels": channels_info,
+        "channel_count": len(support_channels)
     }
 
 @app.get("/join")
@@ -929,7 +1015,7 @@ async def join_page(request: Request, token: str, user_id: int):
     is_member = await verify_user_membership(user_id)
     if not is_member:
         # Redirect to verification page
-        raise HTTPException(status_code=303, detail="Not a member of support channel")
+        raise HTTPException(status_code=303, detail="Not a member of all support channels")
     
     # Increment clicks
     links_collection.update_one(
