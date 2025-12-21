@@ -846,7 +846,7 @@ h1{
 }
 
 .channels-list::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink));
+  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink);
 }
 
 /* Responsive */
@@ -1098,11 +1098,17 @@ function updateProgress(joinedCount, totalCount) {
     }
 }
 
-function getChannelLogo(channelTitle) {
-    // Default Telegram logo
+function getChannelLogo(channel) {
+    // Use the logo_url provided by the backend if available
+    if (channel.logo_url) {
+        // Add cache buster to prevent caching issues
+        return channel.logo_url + '?t=' + Date.now();
+    }
+    
+    // Fallback to default Telegram logo
     let logo = 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg';
     
-    // Custom logos for specific channel names
+    // Custom logos for specific channel names (as fallback)
     const channelLogos = {
         'team secret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
         'teamsecret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
@@ -1112,6 +1118,7 @@ function getChannelLogo(channelTitle) {
     };
     
     // Check if we have a custom logo for this channel by name
+    const channelTitle = channel.channel_title || channel.display_name || '';
     const channelLower = channelTitle.toLowerCase();
     for (const [key, logoUrl] of Object.entries(channelLogos)) {
         if (channelLower.includes(key)) {
@@ -1154,7 +1161,7 @@ function createChannelsList(channels) {
         channelItem.className = `channel-item ${isJoined ? 'joined' : 'not-joined'}`;
         channelItem.innerHTML = `
             <div class="channel-info">
-                <img src="${getChannelLogo(channelTitle)}" alt="${channelTitle}" class="channel-logo">
+                <img src="${getChannelLogo(channel)}" alt="${channelTitle}" class="channel-logo">
                 <div class="channel-details">
                     <div class="channel-name">${channelTitle}</div>
                     <div class="channel-id">${channel.channel}</div>
@@ -1174,6 +1181,15 @@ function createChannelsList(channels) {
                 ` : ''}
             </div>
         `;
+        
+        // Add error handling for logo loading
+        const logoImg = channelItem.querySelector('.channel-logo');
+        logoImg.onerror = function() {
+            console.log(`Failed to load logo for ${channelTitle}, using fallback`);
+            // If logo fails to load, use Telegram default logo
+            this.src = 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg';
+            this.onerror = null; // Prevent infinite loop
+        };
         
         channelsList.appendChild(channelItem);
     });
