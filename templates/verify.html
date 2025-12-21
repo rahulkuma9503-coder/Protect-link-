@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TEAM SECRET — Verification</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 <style>
 :root{
@@ -180,7 +179,7 @@ body{
     0 0 100px rgba(184,0,255,0.3),
     inset 0 0 40px rgba(0,255,255,0.1);
   z-index:10;
-  max-width:min(600px, 90vw);
+  max-width:min(500px, 90vw);
   width:100%;
   margin:auto;
   overflow:hidden;
@@ -387,7 +386,7 @@ h1{
 }
 
 /* Buttons */
-.verify-button, .join-channel-button, .join-now-button, .check-again-button{
+.join-now-button, .check-again-button, .retry-button{
   padding:clamp(16px, 4vw, 20px) clamp(30px, 6vw, 60px);
   font-size:clamp(1.1em, 3vw, 1.3em);
   border-radius:50px;
@@ -409,11 +408,9 @@ h1{
   text-decoration:none;
   margin:10px 5px;
   min-width:200px;
-  width:100%;
-  max-width:350px;
 }
 
-.verify-button::before, .join-channel-button::before, .join-now-button::before, .check-again-button::before{
+.join-now-button::before, .check-again-button::before, .retry-button::before{
   content:'';
   position:absolute;
   top:50%;
@@ -426,12 +423,12 @@ h1{
   transition:width 0.6s, height 0.6s;
 }
 
-.verify-button:hover::before, .join-channel-button:hover::before, .join-now-button:hover::before, .check-again-button:hover::before{
+.join-now-button:hover::before, .check-again-button:hover::before, .retry-button:hover::before{
   width:300px;
   height:300px;
 }
 
-.verify-button:hover, .join-channel-button:hover, .join-now-button:hover, .check-again-button:hover{
+.join-now-button:hover, .check-again-button:hover, .retry-button:hover{
   background:linear-gradient(135deg, rgba(0,255,255,0.4), rgba(184,0,255,0.4));
   transform:translateY(-3px) scale(1.05);
   box-shadow:
@@ -441,37 +438,17 @@ h1{
   border-color:var(--neon-purple);
 }
 
-.verify-button:active, .join-channel-button:active, .join-now-button:active, .check-again-button:active{
+.join-now-button:active, .check-again-button:active, .retry-button:active{
   transform:translateY(0) scale(1);
 }
 
-.verify-button:disabled, .join-now-button:disabled{
+.join-now-button:disabled{
   opacity:0.6;
   cursor:not-allowed;
   transform:none;
 }
 
 /* Special button colors */
-.verify-button{
-  background:linear-gradient(135deg, rgba(0,255,255,0.3), rgba(0,100,255,0.3));
-}
-
-.join-channel-button{
-  background:linear-gradient(135deg, rgba(255,165,0,0.3), rgba(255,69,0,0.3));
-  border-color:var(--neon-orange);
-  box-shadow:0 0 20px rgba(255,140,0,0.5);
-}
-
-.join-channel-button::before{
-  background:radial-gradient(circle, var(--neon-orange), transparent);
-}
-
-.join-channel-button:hover{
-  background:linear-gradient(135deg, rgba(255,165,0,0.5), rgba(255,69,0,0.5));
-  border-color:#ff5500;
-  box-shadow:0 0 40px rgba(255,140,0,0.7), 0 0 60px rgba(255,69,0,0.5);
-}
-
 .join-now-button{
   background:linear-gradient(135deg, rgba(0,255,0,0.3), rgba(0,128,0,0.3));
   border-color:var(--neon-green);
@@ -504,133 +481,20 @@ h1{
   box-shadow:0 0 40px rgba(255,215,0,0.7), 0 0 60px rgba(255,215,0,0.5);
 }
 
-/* Channel List */
-.channels-list {
-  width: 100%;
-  max-width: 450px;
-  margin: 20px auto;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 15px;
-  padding: 20px;
-  border: 1px solid rgba(0, 255, 255, 0.2);
-  box-shadow: 0 0 20px rgba(0, 255, 255, 0.1);
+.retry-button{
+  background:linear-gradient(135deg, rgba(255,69,0,0.3), rgba(255,0,0,0.3));
+  border-color:var(--neon-red);
+  box-shadow:0 0 20px rgba(255,0,0,0.5);
 }
 
-.channel-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 15px;
-  margin-bottom: 10px;
-  background: rgba(0, 20, 40, 0.5);
-  border-radius: 10px;
-  border-left: 3px solid var(--neon-cyan);
-  transition: all 0.3s ease;
+.retry-button::before{
+  background:radial-gradient(circle, var(--neon-red), transparent);
 }
 
-.channel-item:hover {
-  background: rgba(0, 40, 80, 0.6);
-  transform: translateX(5px);
-  box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
-}
-
-.channel-item:last-child {
-  margin-bottom: 0;
-}
-
-.channel-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-
-.channel-icon {
-  font-size: 1.5em;
-  color: var(--neon-cyan);
-}
-
-.channel-name {
-  font-weight: 600;
-  color: white;
-  font-size: 1.1em;
-}
-
-.channel-status {
-  font-size: 0.9em;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-weight: 600;
-}
-
-.status-joined {
-  background: rgba(0, 255, 0, 0.2);
-  color: var(--neon-green);
-  border: 1px solid rgba(0, 255, 0, 0.3);
-}
-
-.status-not-joined {
-  background: rgba(255, 0, 0, 0.2);
-  color: var(--neon-red);
-  border: 1px solid rgba(255, 0, 0, 0.3);
-}
-
-/* Progress Bar */
-.progress-container {
-  width: 100%;
-  max-width: 450px;
-  margin: 20px auto;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 1.1em;
-}
-
-.progress-label {
-  color: white;
-  font-weight: 600;
-}
-
-.progress-percentage {
-  color: var(--neon-cyan);
-  font-weight: 700;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 12px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid rgba(0, 255, 255, 0.2);
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple));
-  border-radius: 6px;
-  width: 0%;
-  transition: width 1s ease-in-out;
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-}
-
-/* Required Channels Info */
-.required-info {
-  font-size: 1em;
-  color: rgba(255, 255, 255, 0.7);
-  margin: 15px 0;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 10px;
-  border: 1px solid rgba(0, 255, 255, 0.1);
-}
-
-.required-info i {
-  color: var(--neon-cyan);
-  margin-right: 8px;
+.retry-button:hover{
+  background:linear-gradient(135deg, rgba(255,69,0,0.5), rgba(255,0,0,0.5));
+  border-color:#ff4500;
+  box-shadow:0 0 40px rgba(255,0,0,0.7), 0 0 60px rgba(255,69,0,0.5);
 }
 
 /* Result Messages */
@@ -752,6 +616,15 @@ h1{
   }
 }
 
+/* Simple info text */
+.info-text {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 10px 0 20px 0;
+  max-width: 400px;
+  line-height: 1.4;
+}
+
 /* Responsive */
 @media(max-width:480px){
   body{padding:10px}
@@ -759,14 +632,14 @@ h1{
     padding:30px 20px;
     border-radius:20px;
     min-height:450px;
-    max-width:95vw;
   }
   .status{padding:0 20px}
-  .verify-button, .join-channel-button, .join-now-button, .check-again-button{
-    padding:15px 25px;
-    font-size:1em;
+  .join-now-button, .check-again-button, .retry-button{
+    padding:15px 30px;
+    font-size:1.1em;
     min-width:180px;
-    max-width:100%;
+    width:100%;
+    max-width:250px;
   }
   .button-container, #action-buttons{
     gap:12px;
@@ -775,20 +648,9 @@ h1{
     padding:12px;
     font-size:1em;
   }
-  .channels-list {
-    padding: 15px;
-  }
-  .channel-item {
-    padding: 10px 12px;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .channel-info {
-    width: 100%;
-  }
-  .channel-status {
-    align-self: flex-end;
+  .info-text {
+    font-size: 0.85em;
+    padding: 0 10px;
   }
 }
 
@@ -814,23 +676,6 @@ h1{
     margin:15px 0;
   }
 }
-
-/* Join All Button */
-.join-all-button {
-  background: linear-gradient(135deg, rgba(255,0,255,0.3), rgba(184,0,255,0.3));
-  border-color: var(--neon-pink);
-  box-shadow: 0 0 20px rgba(255,0,255,0.5);
-}
-
-.join-all-button::before {
-  background: radial-gradient(circle, var(--neon-pink), transparent);
-}
-
-.join-all-button:hover {
-  background: linear-gradient(135deg, rgba(255,0,255,0.5), rgba(184,0,255,0.5));
-  border-color: #ff00ff;
-  box-shadow: 0 0 40px rgba(255,0,255,0.7), 0 0 60px rgba(184,0,255,0.5);
-}
 </style>
 </head>
 <body>
@@ -852,7 +697,7 @@ h1{
     <img src='https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg' alt='Team Secret Logo'>
   </div>
   <h1>TEAM SECRET</h1>
-  <div class='status'>Multi-Channel Verification</div>
+  <div class='status'>Verification Required</div>
   <div id="fullname" class='fullname-display'>Loading...</div>
   
   <div class='scanning'>
@@ -860,38 +705,19 @@ h1{
   </div>
   
   <div class='content-area'>
-    <!-- Initial State: Verify Button -->
+    <!-- Initial State: Join Now Button -->
     <div id="initial-state" class='button-container'>
-      <button id="verifyBtn" class='verify-button'>
-        <span class='button-text'>Check Channel Membership</span>
-      </button>
-      <div class="required-info">
-        <i class="fas fa-info-circle"></i> You need to join all required channels to access this content
+      <div class="info-text">
+        Click below to verify your channel membership and access the protected content.
       </div>
+      <button id="joinNowBtn" class='join-now-button'>
+        <span class='button-text'>Join Now</span>
+      </button>
     </div>
     
     <!-- Verification Result -->
     <div id="result-section">
       <div id="result-message" class='result-message'></div>
-      
-      <!-- Channels List Container -->
-      <div id="channels-container" style="display: none;">
-        <!-- Progress Bar -->
-        <div id="progress-container" class="progress-container" style="display: none;">
-          <div class="progress-header">
-            <span class="progress-label">Verification Progress</span>
-            <span id="progress-percentage" class="progress-percentage">0%</span>
-          </div>
-          <div class="progress-bar">
-            <div id="progress-fill" class="progress-fill"></div>
-          </div>
-        </div>
-        
-        <!-- Channels List -->
-        <div id="channels-list" class="channels-list"></div>
-      </div>
-      
-      <!-- Action Buttons -->
       <div id="action-buttons" class='button-container'></div>
     </div>
     
@@ -912,13 +738,8 @@ const initialState = document.getElementById('initial-state');
 const resultSection = document.getElementById('result-section');
 const resultMessage = document.getElementById('result-message');
 const actionButtons = document.getElementById('action-buttons');
-const channelsContainer = document.getElementById('channels-container');
-const progressContainer = document.getElementById('progress-container');
-const progressFill = document.getElementById('progress-fill');
-const progressPercentage = document.getElementById('progress-percentage');
-const channelsList = document.getElementById('channels-list');
 const loading = document.getElementById('loading');
-const verifyBtn = document.getElementById('verifyBtn');
+const joinNowBtn = document.getElementById('joinNowBtn');
 
 // Initialize Telegram WebApp
 tg.ready();
@@ -994,170 +815,80 @@ displayFullName();
 function showLoading() {
     initialState.style.display = 'none';
     resultSection.style.display = 'none';
-    channelsContainer.style.display = 'none';
     loading.style.display = 'block';
 }
 
-function updateProgress(joinedCount, totalCount) {
-    if (totalCount > 0) {
-        const percentage = Math.round((joinedCount / totalCount) * 100);
-        progressFill.style.width = `${percentage}%`;
-        progressPercentage.textContent = `${percentage}%`;
-        
-        progressContainer.style.display = 'block';
-    } else {
-        progressContainer.style.display = 'none';
-    }
-}
-
-function createChannelsList(channels, isMember) {
-    channelsList.innerHTML = '';
-    
-    if (!channels || channels.length === 0) {
-        channelsContainer.style.display = 'none';
-        return;
-    }
-    
-    let joinedCount = 0;
-    
-    channels.forEach((channel, index) => {
-        const channelItem = document.createElement('div');
-        channelItem.className = 'channel-item';
-        
-        // Extract channel name for display
-        let channelName = channel.channel;
-        if (channelName.startsWith('@')) {
-            channelName = channelName.substring(1);
-        } else if (channelName.startsWith('-100')) {
-            channelName = `Channel ${channelName}`;
-        }
-        
-        // Determine if user is a member of this specific channel
-        // For now, we'll show all as not joined if isMember is false
-        // In a more advanced implementation, we could check each channel individually
-        const isChannelMember = isMember ? true : false;
-        
-        if (isChannelMember) joinedCount++;
-        
-        channelItem.innerHTML = `
-            <div class="channel-info">
-                <div class="channel-icon">
-                    <i class="fab fa-telegram"></i>
-                </div>
-                <div class="channel-name">${channelName}</div>
-            </div>
-            <div class="channel-status ${isChannelMember ? 'status-joined' : 'status-not-joined'}">
-                ${isChannelMember ? '✓ Joined' : '✗ Not Joined'}
-            </div>
-        `;
-        
-        // Add click event to open channel
-        if (channel.invite_link && !isChannelMember) {
-            channelItem.style.cursor = 'pointer';
-            channelItem.addEventListener('click', () => {
-                window.open(channel.invite_link, '_blank');
-            });
-        }
-        
-        channelsList.appendChild(channelItem);
-    });
-    
-    // Update progress
-    updateProgress(joinedCount, channels.length);
-    
-    channelsContainer.style.display = 'block';
-}
-
-function showResult(message, isSuccess, channels, channelCount) {
+function showResult(message, isSuccess, joinLink) {
     loading.style.display = 'none';
     resultMessage.textContent = message;
+    resultMessage.className = isSuccess ? 'result-message success-message' : 'result-message warning-message';
+    
+    let buttonsHTML = '';
     
     if (isSuccess) {
-        resultMessage.className = 'result-message success-message';
-        actionButtons.innerHTML = `
-            <button id="joinNowBtn" class="join-now-button">
+        // User verified - show access button
+        buttonsHTML = `
+            <button id="accessContentBtn" class="join-now-button">
                 <span class="button-text">Access Protected Content</span>
             </button>
-            <button id="checkAgainBtn" class="check-again-button">
-                <span class="button-text">Check Again</span>
-            </button>
         `;
-        channelsContainer.style.display = 'none';
     } else {
-        resultMessage.className = 'result-message warning-message';
-        
-        // Create buttons HTML
-        let buttonsHTML = '';
-        
-        if (channels && channels.length > 0) {
-            // Add a "Join All" button that opens all channels
-            buttonsHTML += `
-                <button id="joinAllBtn" class="join-all-button">
-                    <span class="button-text"><i class="fas fa-external-link-alt"></i> Open All Channels</span>
+        // User needs to join - show join channel button
+        if (joinLink) {
+            buttonsHTML = `
+                <a href="${joinLink}" target="_blank" class="join-now-button">
+                    <span class="button-text">Join Channel(s)</span>
+                </a>
+                <button id="checkAgainBtn" class="check-again-button">
+                    <span class="button-text">Check Again</span>
+                </button>
+            `;
+        } else {
+            buttonsHTML = `
+                <button id="retryBtn" class="retry-button">
+                    <span class="button-text">Retry Verification</span>
                 </button>
             `;
         }
-        
-        buttonsHTML += `
-            <button id="checkAgainBtn" class="check-again-button">
-                <span class="button-text">Check Membership Again</span>
-            </button>
-        `;
-        
-        actionButtons.innerHTML = buttonsHTML;
-        
-        // Show channels list
-        createChannelsList(channels, false);
     }
     
+    actionButtons.innerHTML = buttonsHTML;
     initialState.style.display = 'none';
     resultSection.style.display = 'flex';
     
     // Add event listeners to new buttons
     setTimeout(() => {
-        const joinNowBtn = document.getElementById('joinNowBtn');
+        const accessContentBtn = document.getElementById('accessContentBtn');
         const checkAgainBtn = document.getElementById('checkAgainBtn');
-        const joinAllBtn = document.getElementById('joinAllBtn');
+        const retryBtn = document.getElementById('retryBtn');
         
-        if (joinNowBtn) {
-            joinNowBtn.addEventListener('click', joinGroup);
+        if (accessContentBtn) {
+            accessContentBtn.addEventListener('click', accessContent);
         }
         
         if (checkAgainBtn) {
             checkAgainBtn.addEventListener('click', resetToInitialState);
         }
         
-        if (joinAllBtn && channels) {
-            joinAllBtn.addEventListener('click', () => {
-                // Open all channels in new tabs
-                channels.forEach(channel => {
-                    if (channel.invite_link) {
-                        window.open(channel.invite_link, '_blank');
-                    }
-                });
-                // After a delay, show a message
-                setTimeout(() => {
-                    alert(`Opened ${channels.length} channel(s) in new tabs. Please join all of them and then click "Check Membership Again".`);
-                }, 500);
-            });
+        if (retryBtn) {
+            retryBtn.addEventListener('click', resetToInitialState);
         }
     }, 100);
 }
 
 function resetToInitialState() {
     resultSection.style.display = 'none';
-    channelsContainer.style.display = 'none';
     initialState.style.display = 'flex';
-    verifyBtn.disabled = false;
-    verifyBtn.querySelector('.button-text').textContent = 'Check Channel Membership';
+    joinNowBtn.disabled = false;
+    joinNowBtn.querySelector('.button-text').textContent = 'Join Now';
 }
 
-// Join group function
-async function joinGroup() {
-    const joinBtn = document.getElementById('joinNowBtn');
-    if (joinBtn) {
-        joinBtn.disabled = true;
-        joinBtn.querySelector('.button-text').textContent = 'Loading...';
+// Access content function
+async function accessContent() {
+    const accessBtn = document.getElementById('accessContentBtn');
+    if (accessBtn) {
+        accessBtn.disabled = true;
+        accessBtn.querySelector('.button-text').textContent = 'Loading...';
     }
     
     loading.style.display = 'block';
@@ -1177,37 +908,37 @@ async function joinGroup() {
             setTimeout(() => tg.close(), 1500);
         } else {
             alert('Error: Could not retrieve the protected link.');
-            if (joinBtn) {
-                joinBtn.disabled = false;
-                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+            if (accessBtn) {
+                accessBtn.disabled = false;
+                accessBtn.querySelector('.button-text').textContent = 'Access Protected Content';
             }
             loading.style.display = 'none';
         }
     } catch (error) {
-        console.error('Join error:', error);
+        console.error('Access error:', error);
         alert('An error occurred. Please try again.');
-        if (joinBtn) {
-            joinBtn.disabled = false;
-            joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+        if (accessBtn) {
+            accessBtn.disabled = false;
+            accessBtn.querySelector('.button-text').textContent = 'Access Protected Content';
         }
         loading.style.display = 'none';
     }
 }
 
-// Verification function
-async function verifyMembership() {
+// Main verification function
+async function verifyAndJoin() {
     const user = tg.initDataUnsafe?.user;
     
     if (!user || !user.id) {
-        showResult('User information not available. Please open this in Telegram.', false, [], 0);
+        showResult('User information not available. Please open this in Telegram.', false, null);
         return;
     }
     
     const userId = user.id;
     
     // Show loading
-    verifyBtn.disabled = true;
-    verifyBtn.querySelector('.button-text').textContent = 'Checking...';
+    joinNowBtn.disabled = true;
+    joinNowBtn.querySelector('.button-text').textContent = 'Checking...';
     showLoading();
     
     try {
@@ -1221,28 +952,38 @@ async function verifyMembership() {
         const data = await response.json();
         
         if (data.is_member) {
-            // User is verified - show success
-            showResult(`✅ Verification Successful! You have joined all ${data.channel_count || data.channels?.length || 0} required channels.`, true, data.channels || [], data.channel_count || 0);
+            // User is already a member - show success
+            showResult('✅ Verification Successful! You can now access the protected content.', true, null);
         } else {
-            // User is not a member of all channels
-            const channelCount = data.channel_count || data.channels?.length || 0;
-            let message = `❌ You need to join ${channelCount} channel(s) to access this content.`;
-            
-            if (channelCount > 1) {
-                message = `❌ You need to join all ${channelCount} channels to access this content.`;
+            // User needs to join channels
+            // Get the first channel's invite link or use a default
+            let joinLink = null;
+            if (data.channels && data.channels.length > 0) {
+                // Use the first channel's invite link
+                joinLink = data.channels[0].invite_link;
+            } else if (data.invite_link) {
+                // Fallback to single channel invite link
+                joinLink = data.invite_link;
             }
             
-            showResult(message, false, data.channels || [], channelCount);
+            const channelCount = data.channel_count || data.channels?.length || 1;
+            let message = '❌ You need to join our support channel to access this content.';
+            
+            if (channelCount > 1) {
+                message = `❌ You need to join ${channelCount} support channels to access this content.`;
+            }
+            
+            showResult(message, false, joinLink);
         }
         
     } catch (error) {
         console.error('Verification error:', error);
-        showResult('Error verifying membership. Please try again.', false, [], 0);
+        showResult('Error verifying membership. Please try again.', false, null);
     }
 }
 
-// Event listener for verify button
-verifyBtn.addEventListener('click', verifyMembership);
+// Event listener for join now button
+joinNowBtn.addEventListener('click', verifyAndJoin);
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
