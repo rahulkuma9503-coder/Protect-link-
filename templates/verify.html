@@ -1003,12 +1003,12 @@ h1{
   transform: translateY(-3px);
 }
 
-.try-again-button {
+.Join-Now-button {
   border-color: var(--neon-cyan);
   box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
 }
 
-.try-again-button:hover {
+.Join-now-button:hover {
   background: rgba(0, 255, 255, 0.2);
   box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
   transform: translateY(-3px);
@@ -1260,15 +1260,15 @@ h1{
         <h3>📋 Instructions:</h3>
         <p>1. Check Telegram notification for the group invite</p>
         <p>2. Click "JOIN" in the Telegram popup</p>
-        <p>3. If you didn't get the invite, click "Try Again" below</p>
+        <p>3. If you didn't get the invite, click "JOIN NOW" below</p>
       </div>
       
       <div class="thank-you-button-container">
         <button id="closeButton" class="action-button close-button">
           Close Browser
         </button>
-        <button id="tryAgainButton" class="action-button try-again-button">
-          Try Again
+        <button id="JOINNowButton" class="action-button Join-Now-button">
+          Join Now
         </button>
       </div>
       
@@ -1834,7 +1834,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tg.close();
     });
     
-    document.getElementById('tryAgainButton').addEventListener('click', () => {
+    document.getElementById('Joinnowbutton').addEventListener('click', () => {
         if (window.protectedUrl) {
             openTelegramLink(window.protectedUrl);
         } else {
