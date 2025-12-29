@@ -507,6 +507,33 @@ h1{
   box-shadow:0 0 40px rgba(255,215,0,0.7), 0 0 60px rgba(255,215,0,0.5);
 }
 
+/* Skip Ad Button */
+.skip-ad-button {
+  padding: 12px 25px;
+  font-size: 1em;
+  border-radius: 50px;
+  border: 2px solid #ff8c00;
+  background: linear-gradient(135deg, rgba(255, 140, 0, 0.3), rgba(255, 69, 0, 0.3));
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 15px rgba(255, 140, 0, 0.5);
+  display: none;
+  margin-top: 10px;
+}
+
+.skip-ad-button:hover {
+  background: linear-gradient(135deg, rgba(255, 140, 0, 0.5), rgba(255, 69, 0, 0.5));
+  transform: translateY(-2px);
+  box-shadow: 0 0 25px rgba(255, 140, 0, 0.7);
+}
+
 /* Channels List */
 .channels-container {
   width: 100%;
@@ -848,7 +875,7 @@ h1{
 }
 
 .channels-list::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink);
+  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink));
 }
 
 /* Responsive */
@@ -981,6 +1008,11 @@ h1{
         <div id="channels-list" class="channels-list"></div>
       </div>
       
+      <!-- Skip Ad Button -->
+      <button id="skipAdBtn" class='skip-ad-button'>
+        <span class='button-text'>Skip Ad & Access Content</span>
+      </button>
+      
       <!-- Action Buttons -->
       <div id="action-buttons" class='button-container'></div>
     </div>
@@ -1009,6 +1041,7 @@ const progressPercentage = document.getElementById('progress-percentage');
 const channelsList = document.getElementById('channels-list');
 const loading = document.getElementById('loading');
 const verifyBtn = document.getElementById('verifyBtn');
+const skipAdBtn = document.getElementById('skipAdBtn');
 
 // Initialize Telegram WebApp
 tg.ready();
@@ -1086,6 +1119,7 @@ function showLoading() {
     resultSection.style.display = 'none';
     channelsContainer.style.display = 'none';
     progressContainer.style.display = 'none';
+    skipAdBtn.style.display = 'none';
     loading.style.display = 'block';
 }
 
@@ -1291,6 +1325,7 @@ function resetToInitialState() {
     resultSection.style.display = 'none';
     channelsContainer.style.display = 'none';
     progressContainer.style.display = 'none';
+    skipAdBtn.style.display = 'none';
     initialState.style.display = 'flex';
     verifyBtn.disabled = false;
     verifyBtn.querySelector('.button-text').textContent = 'Verify Membership';
@@ -1322,9 +1357,82 @@ function initializeAutoAds() {
     });
 }
 
+// Function to get the protected link
+async function getProtectedLink() {
+    try {
+        const response = await fetch(`/getgrouplink/${token}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data.url;
+    } catch (error) {
+        console.error('Failed to get protected link:', error);
+        return null;
+    }
+}
+
+// Function to open Telegram link
+function openTelegramLink(url) {
+    if (url) {
+        tg.openTelegramLink(url);
+        setTimeout(() => {
+            tg.close();
+        }, 1500);
+        return true;
+    }
+    return false;
+}
+
+// Function to directly access without ad
+async function accessWithoutAd() {
+    const joinBtn = document.getElementById('joinNowBtn');
+    
+    loading.style.display = 'block';
+    loading.textContent = 'Opening protected content...';
+    skipAdBtn.style.display = 'none';
+    
+    try {
+        const groupUrl = await getProtectedLink();
+        
+        if (groupUrl) {
+            setTimeout(() => {
+                const opened = openTelegramLink(groupUrl);
+                if (!opened) {
+                    // Fallback: Show link
+                    alert(`Please join: ${groupUrl}`);
+                    if (joinBtn) {
+                        joinBtn.disabled = false;
+                        joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+                    }
+                    loading.style.display = 'none';
+                }
+            }, 500);
+        } else {
+            alert('Error: Could not retrieve the protected link.');
+            if (joinBtn) {
+                joinBtn.disabled = false;
+                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+            }
+            loading.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Access error:', error);
+        alert('An error occurred. Please try again.');
+        if (joinBtn) {
+            joinBtn.disabled = false;
+            joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+        }
+        loading.style.display = 'none';
+    }
+}
+
 // Join group function with rewarded popup ad integration
 async function joinGroup() {
     const joinBtn = document.getElementById('joinNowBtn');
+    
     if (joinBtn) {
         joinBtn.disabled = true;
         joinBtn.querySelector('.button-text').textContent = 'Loading...';
@@ -1333,91 +1441,96 @@ async function joinGroup() {
     loading.style.display = 'block';
     loading.textContent = 'Preparing access...';
     
+    // Show skip button after 10 seconds
+    const skipTimer = setTimeout(() => {
+        skipAdBtn.style.display = 'block';
+    }, 10000);
+    
     try {
         // Check if ad SDK is available
         if (isAdSDKAvailable()) {
-            loading.textContent = 'Loading ad... Please wait';
+            loading.textContent = 'Loading ad... Please wait 5-10 seconds';
             
-            // Show rewarded popup ad (user must watch to completion)
-            await show_10391340('pop').then(() => {
-                // User watched the ad to completion - grant access
+            // Show rewarded popup ad with timeout
+            try {
+                // Try to show ad with 25 second timeout
+                const adPromise = new Promise((resolve, reject) => {
+                    // Timeout after 25 seconds
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Ad timeout after 25 seconds'));
+                    }, 25000);
+                    
+                    show_10391340('pop').then(() => {
+                        clearTimeout(timeout);
+                        resolve(true);
+                    }).catch(error => {
+                        clearTimeout(timeout);
+                        reject(error);
+                    });
+                });
+                
+                await adPromise;
+                
+                // Ad completed successfully
+                clearTimeout(skipTimer);
+                skipAdBtn.style.display = 'none';
                 loading.textContent = 'Thank you! Opening protected content...';
                 
-                // Continue with group access after ad
-                setTimeout(async () => {
-                    try {
-                        const response = await fetch(`/getgrouplink/${token}`);
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        
-                        if (data.url) {
-                            tg.openTelegramLink(data.url);
-                            setTimeout(() => tg.close(), 1500);
-                        } else {
-                            alert('Error: Could not retrieve the protected link.');
-                            if (joinBtn) {
-                                joinBtn.disabled = false;
-                                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-                            }
-                            loading.style.display = 'none';
-                        }
-                    } catch (error) {
-                        console.error('Join error:', error);
-                        alert('An error occurred. Please try again.');
-                        if (joinBtn) {
-                            joinBtn.disabled = false;
-                            joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-                        }
-                        loading.style.display = 'none';
+            } catch (adError) {
+                console.error('Ad error:', adError);
+                // If ad fails, just continue without it
+                clearTimeout(skipTimer);
+                skipAdBtn.style.display = 'none';
+                loading.textContent = 'Opening protected content...';
+            }
+        }
+        
+        // Get the protected link (whether ad played or not)
+        const groupUrl = await getProtectedLink();
+        
+        if (groupUrl) {
+            setTimeout(() => {
+                const opened = openTelegramLink(groupUrl);
+                if (!opened) {
+                    // Fallback: Show link
+                    alert(`Please join: ${groupUrl}`);
+                    if (joinBtn) {
+                        joinBtn.disabled = false;
+                        joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
                     }
-                }, 1000);
-                
-            }).catch((error) => {
-                console.error('Ad error:', error);
-                alert('Ad failed to load or was not completed. Please try again.');
-                if (joinBtn) {
-                    joinBtn.disabled = false;
-                    joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+                    loading.style.display = 'none';
                 }
-                loading.style.display = 'none';
-            });
+            }, 1000);
         } else {
-            // If ad SDK is not available, proceed without ad
-            loading.textContent = 'Opening protected content...';
-            
-            const response = await fetch(`/getgrouplink/${token}`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            alert('Error: Could not retrieve the protected link.');
+            if (joinBtn) {
+                joinBtn.disabled = false;
+                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
             }
-            
-            const data = await response.json();
-            
-            if (data.url) {
-                tg.openTelegramLink(data.url);
-                setTimeout(() => tg.close(), 1500);
-            } else {
-                alert('Error: Could not retrieve the protected link.');
-                if (joinBtn) {
-                    joinBtn.disabled = false;
-                    joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-                }
-                loading.style.display = 'none';
-            }
+            loading.style.display = 'none';
         }
         
     } catch (error) {
         console.error('Join error:', error);
-        alert('An error occurred. Please try again.');
+        clearTimeout(skipTimer);
+        
+        // Try to get protected link even if everything else fails
+        try {
+            const groupUrl = await getProtectedLink();
+            if (groupUrl) {
+                alert(`Please join: ${groupUrl}`);
+            }
+        } catch (e) {
+            console.error('Failed to get protected link:', e);
+            alert('An error occurred. Please try again.');
+        }
+        
         if (joinBtn) {
             joinBtn.disabled = false;
             joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
         }
         loading.style.display = 'none';
+        skipAdBtn.style.display = 'none';
     }
 }
 
@@ -1478,6 +1591,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Event listener for verify button
     verifyBtn.addEventListener('click', verifyMembership);
+    
+    // Event listener for skip ad button
+    skipAdBtn.addEventListener('click', accessWithoutAd);
 });
 
 // Clean up on page unload
