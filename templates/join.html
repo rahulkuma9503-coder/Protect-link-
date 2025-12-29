@@ -518,6 +518,33 @@ h1{
   }
 }
 
+/* Skip Ad Button */
+.skip-ad-button {
+  padding: 12px 25px;
+  font-size: 1em;
+  border-radius: 50px;
+  border: 2px solid #ff8c00;
+  background: linear-gradient(135deg, rgba(255, 140, 0, 0.3), rgba(255, 69, 0, 0.3));
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 15px rgba(255, 140, 0, 0.5);
+  display: none;
+  margin-top: 15px;
+}
+
+.skip-ad-button:hover {
+  background: linear-gradient(135deg, rgba(255, 140, 0, 0.5), rgba(255, 69, 0, 0.5));
+  transform: translateY(-2px);
+  box-shadow: 0 0 25px rgba(255, 140, 0, 0.7);
+}
+
 /* Responsive */
 @media(max-width:480px){
   body{padding:10px}
@@ -565,6 +592,10 @@ h1{
   
   <button id="joinBtn" class='join-now-button success-animation'>
     <span class='button-text'>Join Now</span>
+  </button>
+  
+  <button id="skipAdBtn" class='skip-ad-button'>
+    <span class='button-text'>Skip Ad & Join Group</span>
   </button>
   
   <div id="loading" class='loading'>Opening group...</div>
@@ -686,81 +717,65 @@ function initializeAutoAds() {
     });
 }
 
-document.getElementById('joinBtn').addEventListener('click', async () => {
+// Function to get the group link
+async function getGroupLink() {
+    try {
+        const response = await fetch(`/getgrouplink/${token}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data.url;
+    } catch (error) {
+        console.error('Failed to get group link:', error);
+        return null;
+    }
+}
+
+// Function to open Telegram link
+function openTelegramLink(url) {
+    if (url) {
+        tg.openTelegramLink(url);
+        setTimeout(() => {
+            tg.close();
+        }, 1500);
+        return true;
+    }
+    return false;
+}
+
+// Function to directly join without ad
+async function joinWithoutAd() {
     const joinBtn = document.getElementById('joinBtn');
     const loading = document.getElementById('loading');
+    const skipBtn = document.getElementById('skipAdBtn');
     
-    joinBtn.disabled = true;
-    joinBtn.querySelector('.button-text').textContent = 'Loading...';
     loading.style.display = 'block';
+    loading.textContent = 'Opening group...';
+    
+    if (skipBtn) skipBtn.style.display = 'none';
     
     try {
-        // Check if ad SDK is available
-        if (isAdSDKAvailable()) {
-            loading.textContent = 'Loading ad... Please wait';
-            
-            // Show rewarded popup ad (user must watch to completion)
-            await show_10391340('pop').then(() => {
-                // User watched the ad to completion - grant access
-                loading.textContent = 'Thank you! Opening group...';
-                
-                // Continue with group access after ad
-                setTimeout(async () => {
-                    try {
-                        const response = await fetch(`/getgrouplink/${token}`);
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        
-                        if (data.url) {
-                            tg.openTelegramLink(data.url);
-                            setTimeout(() => tg.close(), 1500);
-                        } else {
-                            alert('Error: Could not retrieve the group link.');
-                            joinBtn.disabled = false;
-                            joinBtn.querySelector('.button-text').textContent = 'Join Now';
-                            loading.style.display = 'none';
-                        }
-                    } catch (error) {
-                        console.error('Join error:', error);
-                        alert('An error occurred. Please try again.');
-                        joinBtn.disabled = false;
-                        joinBtn.querySelector('.button-text').textContent = 'Join Now';
-                        loading.style.display = 'none';
-                    }
-                }, 1000);
-                
-            }).catch((error) => {
-                console.error('Ad error:', error);
-                alert('Ad failed to load or was not completed. Please try again.');
-                joinBtn.disabled = false;
-                joinBtn.querySelector('.button-text').textContent = 'Join Now';
-                loading.style.display = 'none';
-            });
+        const groupUrl = await getGroupLink();
+        
+        if (groupUrl) {
+            setTimeout(() => {
+                const opened = openTelegramLink(groupUrl);
+                if (!opened) {
+                    // Fallback: Show link
+                    alert(`Please join the group: ${groupUrl}`);
+                    joinBtn.disabled = false;
+                    joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                    loading.style.display = 'none';
+                }
+            }, 500);
         } else {
-            // If ad SDK is not available, proceed without ad
-            loading.textContent = 'Opening group...';
-            
-            const response = await fetch(`/getgrouplink/${token}`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            if (data.url) {
-                tg.openTelegramLink(data.url);
-                setTimeout(() => tg.close(), 1500);
-            } else {
-                alert('Error: Could not retrieve the group link.');
-                joinBtn.disabled = false;
-                joinBtn.querySelector('.button-text').textContent = 'Join Now';
-                loading.style.display = 'none';
-            }
+            alert('Error: Could not retrieve the group link.');
+            joinBtn.disabled = false;
+            joinBtn.querySelector('.button-text').textContent = 'Join Now';
+            loading.style.display = 'none';
         }
     } catch (error) {
         console.error('Join error:', error);
@@ -769,7 +784,110 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
         joinBtn.querySelector('.button-text').textContent = 'Join Now';
         loading.style.display = 'none';
     }
-});
+}
+
+// Main join function with ad
+async function handleJoin() {
+    const joinBtn = document.getElementById('joinBtn');
+    const loading = document.getElementById('loading');
+    const skipBtn = document.getElementById('skipAdBtn');
+    
+    joinBtn.disabled = true;
+    joinBtn.querySelector('.button-text').textContent = 'Loading...';
+    loading.style.display = 'block';
+    loading.textContent = 'Preparing...';
+    
+    // Show skip button after 10 seconds
+    const skipTimer = setTimeout(() => {
+        if (skipBtn) skipBtn.style.display = 'block';
+    }, 10000);
+    
+    try {
+        // Check if ad SDK is available
+        if (isAdSDKAvailable()) {
+            loading.textContent = 'Loading ad... Please wait 5-10 seconds';
+            
+            // Show rewarded popup ad with timeout
+            try {
+                // Try to show ad with 25 second timeout
+                const adPromise = new Promise((resolve, reject) => {
+                    // Timeout after 25 seconds
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Ad timeout after 25 seconds'));
+                    }, 25000);
+                    
+                    show_10391340('pop').then(() => {
+                        clearTimeout(timeout);
+                        resolve(true);
+                    }).catch(error => {
+                        clearTimeout(timeout);
+                        reject(error);
+                    });
+                });
+                
+                await adPromise;
+                
+                // Ad completed successfully
+                clearTimeout(skipTimer);
+                if (skipBtn) skipBtn.style.display = 'none';
+                loading.textContent = 'Thank you! Opening group now...';
+                
+            } catch (adError) {
+                console.error('Ad error:', adError);
+                // If ad fails, just continue without it
+                clearTimeout(skipTimer);
+                if (skipBtn) skipBtn.style.display = 'none';
+                loading.textContent = 'Opening group...';
+            }
+        }
+        
+        // Get the group link (whether ad played or not)
+        const groupUrl = await getGroupLink();
+        
+        if (groupUrl) {
+            // Open the group
+            setTimeout(() => {
+                const opened = openTelegramLink(groupUrl);
+                if (!opened) {
+                    // Fallback: Show link
+                    alert(`Please join the group: ${groupUrl}`);
+                    joinBtn.disabled = false;
+                    joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                    loading.style.display = 'none';
+                }
+            }, 1000);
+        } else {
+            alert('Error: Could not retrieve the group link.');
+            joinBtn.disabled = false;
+            joinBtn.querySelector('.button-text').textContent = 'Join Now';
+            loading.style.display = 'none';
+        }
+        
+    } catch (error) {
+        console.error('Join error:', error);
+        clearTimeout(skipTimer);
+        
+        // Try to get group link even if everything else fails
+        try {
+            const groupUrl = await getGroupLink();
+            if (groupUrl) {
+                alert(`Please join the group: ${groupUrl}`);
+            }
+        } catch (e) {
+            console.error('Failed to get group link:', e);
+            alert('An error occurred. Please try again.');
+        }
+        
+        joinBtn.disabled = false;
+        joinBtn.querySelector('.button-text').textContent = 'Join Now';
+        loading.style.display = 'none';
+        if (skipBtn) skipBtn.style.display = 'none';
+    }
+}
+
+// Attach event listeners
+document.getElementById('joinBtn').addEventListener('click', handleJoin);
+document.getElementById('skipAdBtn').addEventListener('click', joinWithoutAd);
 
 // Initialize auto ads when page loads
 document.addEventListener('DOMContentLoaded', function() {
