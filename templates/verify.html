@@ -6,6 +6,8 @@
 <title>TEAM SECRET — Verification</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Rewarded Interstitial Ad SDK -->
+<script src='//libtl.com/sdk.js' data-zone='10391340' data-sdk='show_10391340'></script>
 
 <style>
 :root{
@@ -34,6 +36,52 @@ body{
   position:relative;
   padding:20px;
   overflow-x:hidden;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+
+/* Close Prevention Overlay */
+#close-overlay{
+  display:none;
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  background:rgba(0,0,0,0.9);
+  z-index:9999;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+  color:white;
+  text-align:center;
+  padding:20px;
+}
+
+.close-message{
+  font-size:1.2em;
+  margin-bottom:20px;
+  color:#00ffff;
+  text-shadow:0 0 10px #00ffff;
+  background:rgba(0,0,0,0.7);
+  padding:20px;
+  border-radius:15px;
+  border:2px solid #00ffff;
+  max-width:400px;
+}
+
+.continue-button{
+  padding:15px 30px;
+  background:linear-gradient(135deg,#00ffff,#00aaff);
+  color:white;
+  border:none;
+  border-radius:25px;
+  font-size:1.1em;
+  cursor:pointer;
+  margin-top:20px;
+  font-weight:bold;
+  box-shadow:0 0 20px #00ffff;
 }
 
 /* Animated Grid Background */
@@ -188,6 +236,7 @@ body{
   display:flex;
   flex-direction:column;
   justify-content:center;
+  transition: opacity 0.5s ease;
 }
 
 @keyframes float-container{
@@ -830,6 +879,166 @@ h1{
   box-shadow: 0 0 40px rgba(255,0,255,0.7), 0 0 60px rgba(184,0,255,0.5);
 }
 
+/* Thank You Page Styles */
+#thank-you-section {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+#thank-you-section h1 {
+  background: linear-gradient(135deg, var(--neon-green) 0%, var(--neon-cyan) 50%, var(--neon-purple) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 10px;
+}
+
+#thank-you-section h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(1.5em, 4vw, 2em);
+  color: var(--neon-cyan);
+  margin: 20px 0;
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px var(--glow-cyan);
+}
+
+.thank-you-message {
+  font-size: clamp(1em, 3vw, 1.2em);
+  color: #aaf;
+  margin: 20px 0 30px 0;
+  line-height: 1.6;
+  padding: 0 10px;
+  text-align: center;
+}
+
+.checkmark {
+  width: 80px;
+  height: 80px;
+  margin: 20px auto;
+  position: relative;
+}
+
+.checkmark-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neon-green), var(--neon-cyan));
+  animation: pulse-checkmark 2s infinite ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes pulse-checkmark {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px var(--glow-green);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 40px var(--glow-green), 0 0 60px var(--glow-cyan);
+  }
+}
+
+.checkmark-stem {
+  position: absolute;
+  width: 8px;
+  height: 35px;
+  background-color: white;
+  top: 45%;
+  left: 55%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border-radius: 4px;
+}
+
+.checkmark-kick {
+  position: absolute;
+  width: 8px;
+  height: 20px;
+  background-color: white;
+  top: 60%;
+  left: 45%;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  border-radius: 4px;
+}
+
+/* Thank You Button Container */
+.thank-you-button-container {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 30px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.action-button {
+  padding: clamp(14px, 3vw, 18px) clamp(25px, 5vw, 40px);
+  font-size: clamp(1em, 2.5vw, 1.1em);
+  border-radius: 50px;
+  border: 2px solid;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  min-width: 150px;
+}
+
+.close-button {
+  border-color: var(--neon-pink);
+  box-shadow: 0 0 20px rgba(255, 0, 255, 0.3);
+}
+
+.close-button:hover {
+  background: rgba(255, 0, 255, 0.2);
+  box-shadow: 0 0 30px rgba(255, 0, 255, 0.5);
+  transform: translateY(-3px);
+}
+
+.try-again-button {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+}
+
+.try-again-button:hover {
+  background: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+  transform: translateY(-3px);
+}
+
+/* Instructions */
+.instructions {
+  margin-top: 30px;
+  padding: 15px;
+  background: rgba(0, 20, 40, 0.3);
+  border-radius: 15px;
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  max-width: 500px;
+  width: 100%;
+}
+
+.instructions h3 {
+  color: var(--neon-cyan);
+  font-family: 'Orbitron', sans-serif;
+  margin-bottom: 10px;
+  font-size: 1.1em;
+}
+
+.instructions p {
+  color: #88f;
+  font-size: 0.9em;
+  line-height: 1.5;
+  margin: 5px 0;
+}
+
 /* Scrollbar styling */
 .channels-list::-webkit-scrollbar {
   width: 8px;
@@ -846,7 +1055,36 @@ h1{
 }
 
 .channels-list::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink);
+  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink));
+}
+
+/* Feature Styles */
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+
+.feature-icon {
+  width: 8px;
+  height: 8px;
+  background: var(--neon-green);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--glow-green);
+  animation: pulse-icon 2s infinite ease-in-out;
+}
+
+@keyframes pulse-icon {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
 }
 
 /* Responsive */
@@ -893,6 +1131,14 @@ h1{
     padding: 8px 15px;
     font-size: 0.85em;
   }
+  .thank-you-button-container {
+    flex-direction: column;
+    gap: 15px;
+  }
+  .action-button {
+    min-width: auto;
+    width: 100%;
+  }
 }
 
 @media(max-height:600px){
@@ -923,6 +1169,16 @@ h1{
 </style>
 </head>
 <body>
+
+<!-- Close Prevention Overlay -->
+<div id="close-overlay">
+  <div class="close-message">
+    <h3>⚠️ WebApp Closing Prevented</h3>
+    <p>The verification process is in progress. Click "Continue" to resume.</p>
+    <p>Auto-continue in 5 seconds...</p>
+  </div>
+  <button class="continue-button" onclick="reopenWebApp()">Continue</button>
+</div>
 
 <div id="grid-bg"></div>
 <canvas id='matrix-bg'></canvas>
@@ -983,6 +1239,51 @@ h1{
       <div id="action-buttons" class='button-container'></div>
     </div>
     
+    <!-- Thank You Section -->
+    <div id="thank-you-section">
+      <div class="checkmark">
+        <div class="checkmark-circle">
+          <div class="checkmark-stem"></div>
+          <div class="checkmark-kick"></div>
+        </div>
+      </div>
+      
+      <h2>Thank You!</h2>
+      
+      <div class='thank-you-message'>
+        Thank you for completing the verification!<br>
+        The protected content has been opened for you.<br>
+        Please check your Telegram app.
+      </div>
+      
+      <div class="instructions">
+        <h3>📋 Instructions:</h3>
+        <p>1. Check Telegram notification for the group invite</p>
+        <p>2. Click "JOIN" in the Telegram popup</p>
+        <p>3. If you didn't get the invite, click "Try Again" below</p>
+      </div>
+      
+      <div class="thank-you-button-container">
+        <button id="closeButton" class="action-button close-button">
+          Close Browser
+        </button>
+        <button id="tryAgainButton" class="action-button try-again-button">
+          Try Again
+        </button>
+      </div>
+      
+      <div class='features' style="margin-top: 30px; display: flex; gap: 20px; justify-content: center;">
+        <div class='feature'>
+          <div class='feature-icon'></div>
+          <span>Verification Complete</span>
+        </div>
+        <div class='feature'>
+          <div class='feature-icon'></div>
+          <span>Access Granted</span>
+        </div>
+      </div>
+    </div>
+    
     <!-- Loading -->
     <div id="loading" class='loading'>Processing verification...</div>
   </div>
@@ -990,12 +1291,277 @@ h1{
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-// Global variables
-const token = "{{ token }}";
+// Telegram WebApp Integration
 const tg = window.Telegram.WebApp;
 
-// DOM Elements
+// Initialize WebApp with closing prevention
+tg.ready();
+tg.expand();
+
+// DISABLE closing confirmation to prevent accidental closing
+tg.disableClosingConfirmation();
+
+// Store original close function
+let isProcessingJoin = false;
+let isAdShowing = false;
+const originalClose = tg.close;
+
+// Override close function to prevent accidental closing
+tg.close = function() {
+    if (isProcessingJoin || isAdShowing) {
+        console.log('Prevented WebApp close during verification process');
+        showCloseOverlay();
+        return false;
+    }
+    return originalClose.call(tg);
+};
+
+// Function to show overlay when WebApp tries to close
+function showCloseOverlay() {
+    document.getElementById('close-overlay').style.display = 'flex';
+    setTimeout(() => {
+        hideCloseOverlay();
+    }, 5000);
+}
+
+function hideCloseOverlay() {
+    document.getElementById('close-overlay').style.display = 'none';
+}
+
+function reopenWebApp() {
+    hideCloseOverlay();
+    tg.expand();
+}
+
+const token = "{{ token }}";
+
+// Display user's full name
+const user = tg.initDataUnsafe?.user;
 const fullnameElement = document.getElementById('fullname');
+
+if (user) {
+    let displayName = user.first_name || '';
+    if (user.last_name) {
+        displayName += ' ' + user.last_name;
+    }
+    if (!displayName.trim() && user.username) {
+        displayName = `@${user.username}`;
+    }
+    fullnameElement.textContent = displayName.trim() || 'User';
+} else {
+    fullnameElement.textContent = 'User';
+}
+
+// Check if ad SDK is available
+function isAdSDKAvailable() {
+    return typeof show_10391340 === 'function';
+}
+
+// Function to get the protected link
+async function getProtectedLink() {
+    try {
+        const response = await fetch(`/getgrouplink/${token}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data.url;
+    } catch (error) {
+        console.error('Failed to get protected link:', error);
+        return null;
+    }
+}
+
+// Function to open Telegram link SAFELY
+function openTelegramLink(url) {
+    if (!url) return false;
+    
+    try {
+        // First try the Telegram WebApp method
+        tg.openTelegramLink(url);
+        return true;
+    } catch (error) {
+        console.error('Failed to open Telegram link:', error);
+        return false;
+    }
+}
+
+// Function to show thank you page
+function showThankYouPage() {
+    const resultSection = document.getElementById('result-section');
+    const thankYouSection = document.getElementById('thank-you-section');
+    const loading = document.getElementById('loading');
+    
+    // Hide everything
+    resultSection.style.display = 'none';
+    loading.style.display = 'none';
+    
+    // Fade out and show thank you page
+    setTimeout(() => {
+        thankYouSection.style.display = 'flex';
+        thankYouSection.style.opacity = '1';
+    }, 300);
+}
+
+// Function to reset to initial state
+function resetToInitialState() {
+    const resultSection = document.getElementById('result-section');
+    const thankYouSection = document.getElementById('thank-you-section');
+    const initialState = document.getElementById('initial-state');
+    const loading = document.getElementById('loading');
+    
+    // Hide everything
+    resultSection.style.display = 'none';
+    thankYouSection.style.display = 'none';
+    loading.style.display = 'none';
+    
+    // Show initial state
+    initialState.style.display = 'flex';
+    
+    // Reset verify button
+    const verifyBtn = document.getElementById('verifyBtn');
+    if (verifyBtn) {
+        verifyBtn.disabled = false;
+        verifyBtn.querySelector('.button-text').textContent = 'Verify Membership';
+    }
+}
+
+// Main join function
+async function joinGroup() {
+    if (isProcessingJoin) return;
+    
+    const joinBtn = document.getElementById('joinNowBtn');
+    const loading = document.getElementById('loading');
+    
+    isProcessingJoin = true;
+    if (joinBtn) {
+        joinBtn.disabled = true;
+        joinBtn.querySelector('.button-text').textContent = 'Processing...';
+    }
+    loading.style.display = 'block';
+    loading.textContent = 'Getting protected link...';
+    
+    try {
+        // Get the protected link FIRST (before any ads)
+        loading.textContent = 'Getting protected link...';
+        const groupUrl = await getProtectedLink();
+        
+        if (!groupUrl) {
+            throw new Error('Could not get protected link');
+        }
+        
+        // Store the protected URL for later use
+        window.protectedUrl = groupUrl;
+        
+        // Check if ad SDK is available
+        if (isAdSDKAvailable()) {
+            loading.textContent = 'Please wait, loading content...';
+            isAdShowing = true;
+            
+            // Try to show ad with timeout
+            let adCompleted = false;
+            const adTimeout = setTimeout(() => {
+                if (!adCompleted) {
+                    console.log('Ad timeout, proceeding without ad');
+                    adCompleted = true;
+                    isAdShowing = false;
+                    completeAccessProcess();
+                }
+            }, 10000); // 10 second timeout for ad
+            
+            try {
+                // Try to show ad
+                show_10391340('pop').then(() => {
+                    clearTimeout(adTimeout);
+                    adCompleted = true;
+                    isAdShowing = false;
+                    loading.textContent = 'Thank you! Opening protected content...';
+                    setTimeout(() => {
+                        completeAccessProcess();
+                    }, 1000);
+                }).catch(error => {
+                    clearTimeout(adTimeout);
+                    console.error('Ad error:', error);
+                    adCompleted = true;
+                    isAdShowing = false;
+                    loading.textContent = 'Opening protected content...';
+                    setTimeout(() => {
+                        completeAccessProcess();
+                    }, 500);
+                });
+            } catch (adError) {
+                clearTimeout(adTimeout);
+                console.error('Ad SDK error:', adError);
+                adCompleted = true;
+                isAdShowing = false;
+                completeAccessProcess();
+            }
+        } else {
+            // No ad SDK, just open protected content
+            loading.textContent = 'Opening protected content...';
+            setTimeout(() => {
+                completeAccessProcess();
+            }, 500);
+        }
+        
+    } catch (error) {
+        console.error('Access process error:', error);
+        alert('Error: ' + error.message);
+        resetAccessButton();
+    }
+}
+
+// Function to complete the access process
+function completeAccessProcess() {
+    const loading = document.getElementById('loading');
+    const joinBtn = document.getElementById('joinNowBtn');
+    
+    // Update loading text
+    loading.textContent = 'Redirecting to protected content...';
+    
+    // Open the protected link
+    setTimeout(() => {
+        const opened = openTelegramLink(window.protectedUrl);
+        if (!opened) {
+            // Fallback: Show the link
+            alert(`Please access using this link: ${window.protectedUrl}`);
+            resetAccessButton();
+        } else {
+            // Show thank you page after a delay
+            setTimeout(() => {
+                showThankYouPage();
+                isProcessingJoin = false;
+                isAdShowing = false;
+            }, 2000);
+        }
+    }, 1500);
+    
+    // Auto-reset after 15 seconds if something goes wrong
+    setTimeout(() => {
+        if (isProcessingJoin) {
+            resetAccessButton();
+            alert('Process timed out. Please try again.');
+        }
+    }, 15000);
+}
+
+// Function to reset access button
+function resetAccessButton() {
+    const joinBtn = document.getElementById('joinNowBtn');
+    const loading = document.getElementById('loading');
+    
+    isProcessingJoin = false;
+    isAdShowing = false;
+    if (joinBtn) {
+        joinBtn.disabled = false;
+        joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
+    }
+    loading.style.display = 'none';
+}
+
+// DOM Elements
 const initialState = document.getElementById('initial-state');
 const resultSection = document.getElementById('result-section');
 const resultMessage = document.getElementById('result-message');
@@ -1007,77 +1573,6 @@ const progressPercentage = document.getElementById('progress-percentage');
 const channelsList = document.getElementById('channels-list');
 const loading = document.getElementById('loading');
 const verifyBtn = document.getElementById('verifyBtn');
-
-// Initialize Telegram WebApp
-tg.ready();
-tg.expand();
-tg.enableClosingConfirmation();
-
-/* Matrix Background */
-const canvas = document.getElementById('matrix-bg');
-const ctx = canvas.getContext('2d');
-
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
-
-const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*()';
-const arr = chars.split('');
-const fontSize = 14;
-let cols = Math.floor(canvas.width / fontSize);
-let drops = new Array(cols).fill(1);
-
-function drawMatrix() {
-  ctx.fillStyle = 'rgba(0,0,0,0.05)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'rgba(0,255,255,0.5)';
-  ctx.font = fontSize + 'px monospace';
-  
-  for (let i = 0; i < drops.length; i++) {
-    const text = arr[Math.floor(Math.random() * arr.length)];
-    ctx.fillText(text, i * fontSize, drops[i] * fontSize);
-    if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-      drops[i] = 0;
-    }
-    drops[i]++;
-  }
-}
-
-// Start matrix animation
-const matrixInterval = setInterval(drawMatrix, 40);
-
-/* Floating Particles */
-const particleContainer = document.querySelector('.particles');
-for(let i = 0; i < 40; i++){
-  let particle = document.createElement('div');
-  particle.classList.add('particle');
-  particle.style.left = Math.random() * 100 + '%';
-  particle.style.top = Math.random() * 100 + '%';
-  particle.style.animationDelay = (Math.random() * 8) + 's';
-  particle.style.animationDuration = (5 + Math.random() * 5) + 's';
-  particleContainer.appendChild(particle);
-}
-
-// Display user's full name
-function displayFullName() {
-    const user = tg.initDataUnsafe?.user;
-    if (user) {
-        let displayName = user.first_name || '';
-        if (user.last_name) {
-            displayName += ' ' + user.last_name;
-        }
-        if (!displayName.trim() && user.username) {
-            displayName = `@${user.username}`;
-        }
-        fullnameElement.textContent = displayName.trim() || 'User';
-    } else {
-        fullnameElement.textContent = 'User';
-    }
-}
-displayFullName();
 
 function showLoading() {
     initialState.style.display = 'none';
@@ -1099,16 +1594,12 @@ function updateProgress(joinedCount, totalCount) {
 }
 
 function getChannelLogo(channel) {
-    // Use the logo_url provided by the backend if available
     if (channel.logo_url) {
-        // Add cache buster to prevent caching issues
         return channel.logo_url + '?t=' + Date.now();
     }
     
-    // Fallback to default Telegram logo
     let logo = 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg';
     
-    // Custom logos for specific channel names (as fallback)
     const channelLogos = {
         'team secret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
         'teamsecret': 'https://i.ibb.co/8g2YxXq6/tmpyb9cwaub.jpg',
@@ -1117,7 +1608,6 @@ function getChannelLogo(channel) {
         'announcements': 'https://cdn-icons-png.flaticon.com/512/3095/3095583.png'
     };
     
-    // Check if we have a custom logo for this channel by name
     const channelTitle = channel.channel_title || channel.display_name || '';
     const channelLower = channelTitle.toLowerCase();
     for (const [key, logoUrl] of Object.entries(channelLogos)) {
@@ -1130,7 +1620,6 @@ function getChannelLogo(channel) {
 }
 
 function formatChannelName(channel) {
-    // Fallback function to format channel ID if display_name is not available
     if (channel.startsWith('@')) {
         return channel.substring(1).replace(/_/g, ' ').toUpperCase();
     } else if (channel.startsWith('-100')) {
@@ -1145,14 +1634,13 @@ function createChannelsList(channels) {
     
     if (!channels || channels.length === 0) {
         channelsContainer.style.display = 'none';
-        return 0; // Return joined count
+        return 0;
     }
     
     let joinedCount = 0;
     
-    channels.forEach((channel, index) => {
+    channels.forEach((channel) => {
         const channelItem = document.createElement('div');
-        // Use channel_title from backend, fallback to display_name, then format channel ID
         const channelTitle = channel.channel_title || channel.display_name || formatChannelName(channel.channel);
         const isJoined = channel.is_member || false;
         
@@ -1182,13 +1670,10 @@ function createChannelsList(channels) {
             </div>
         `;
         
-        // Add error handling for logo loading
         const logoImg = channelItem.querySelector('.channel-logo');
         logoImg.onerror = function() {
-            console.log(`Failed to load logo for ${channelTitle}, using fallback`);
-            // If logo fails to load, use Telegram default logo
             this.src = 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg';
-            this.onerror = null; // Prevent infinite loop
+            this.onerror = null;
         };
         
         channelsList.appendChild(channelItem);
@@ -1205,7 +1690,6 @@ function showResult(message, isSuccess, channels, channelCount) {
     if (isSuccess) {
         resultMessage.className = 'result-message success-message';
         
-        // Show all channels with status
         const joinedCount = createChannelsList(channels);
         updateProgress(joinedCount, channelCount);
         
@@ -1220,14 +1704,11 @@ function showResult(message, isSuccess, channels, channelCount) {
     } else {
         resultMessage.className = 'result-message warning-message';
         
-        // Show all channels with status
         const joinedCount = createChannelsList(channels);
         updateProgress(joinedCount, channelCount);
         
-        // Create buttons HTML
         let buttonsHTML = '';
         
-        // Add "Join All" button if there are channels not joined
         if (channels && channels.length > 0 && joinedCount < channels.length) {
             buttonsHTML += `
                 <button id="joinAllBtn" class="join-all-button">
@@ -1248,7 +1729,6 @@ function showResult(message, isSuccess, channels, channelCount) {
     initialState.style.display = 'none';
     resultSection.style.display = 'flex';
     
-    // Add event listeners to new buttons
     setTimeout(() => {
         const joinNowBtn = document.getElementById('joinNowBtn');
         const checkAgainBtn = document.getElementById('checkAgainBtn');
@@ -1264,7 +1744,6 @@ function showResult(message, isSuccess, channels, channelCount) {
         
         if (joinAllBtn && channels) {
             joinAllBtn.addEventListener('click', () => {
-                // Open all channels that are not joined in new tabs
                 let openedCount = 0;
                 channels.forEach(channel => {
                     if (!channel.is_member && channel.invite_link) {
@@ -1285,57 +1764,6 @@ function showResult(message, isSuccess, channels, channelCount) {
     }, 100);
 }
 
-function resetToInitialState() {
-    resultSection.style.display = 'none';
-    channelsContainer.style.display = 'none';
-    progressContainer.style.display = 'none';
-    initialState.style.display = 'flex';
-    verifyBtn.disabled = false;
-    verifyBtn.querySelector('.button-text').textContent = 'Verify Membership';
-}
-
-// Join group function
-async function joinGroup() {
-    const joinBtn = document.getElementById('joinNowBtn');
-    if (joinBtn) {
-        joinBtn.disabled = true;
-        joinBtn.querySelector('.button-text').textContent = 'Loading...';
-    }
-    
-    loading.style.display = 'block';
-    loading.textContent = 'Opening protected content...';
-    
-    try {
-        const response = await fetch(`/getgrouplink/${token}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.url) {
-            tg.openTelegramLink(data.url);
-            setTimeout(() => tg.close(), 1500);
-        } else {
-            alert('Error: Could not retrieve the protected link.');
-            if (joinBtn) {
-                joinBtn.disabled = false;
-                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-            }
-            loading.style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Join error:', error);
-        alert('An error occurred. Please try again.');
-        if (joinBtn) {
-            joinBtn.disabled = false;
-            joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-        }
-        loading.style.display = 'none';
-    }
-}
-
 // Verification function
 async function verifyMembership() {
     const user = tg.initDataUnsafe?.user;
@@ -1347,13 +1775,11 @@ async function verifyMembership() {
     
     const userId = user.id;
     
-    // Show loading
     verifyBtn.disabled = true;
     verifyBtn.querySelector('.button-text').textContent = 'Checking...';
     showLoading();
     
     try {
-        // Call verification API
         const response = await fetch(`/check_membership/${token}?user_id=${userId}`);
         
         if (!response.ok) {
@@ -1363,11 +1789,9 @@ async function verifyMembership() {
         const data = await response.json();
         
         if (data.is_member) {
-            // User is verified - show success
             const channelCount = data.channel_count || data.channels?.length || 0;
             showResult(`✅ VERIFICATION SUCCESSFUL! You have joined all ${channelCount} required channels.`, true, data.channels || [], channelCount);
         } else {
-            // User is not a member of all channels
             const channelCount = data.channel_count || data.channels?.length || 0;
             let message = `❌ ACCESS DENIED! You need to join ${channelCount} channel(s) to access this content.`;
             
@@ -1384,12 +1808,56 @@ async function verifyMembership() {
     }
 }
 
-// Event listener for verify button
-verifyBtn.addEventListener('click', verifyMembership);
+// Initialize auto ads when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize automatic in-app interstitial ads
+    setTimeout(() => {
+        if (isAdSDKAvailable()) {
+            show_10391340({
+                type: 'inApp',
+                inAppSettings: {
+                    frequency: 2,
+                    capping: 0.1,
+                    interval: 30,
+                    timeout: 5,
+                    everyPage: false
+                }
+            });
+        }
+    }, 3000);
+    
+    // Event listener for verify button
+    verifyBtn.addEventListener('click', verifyMembership);
+    
+    // Event listeners for thank you page buttons
+    document.getElementById('closeButton').addEventListener('click', () => {
+        tg.close();
+    });
+    
+    document.getElementById('tryAgainButton').addEventListener('click', () => {
+        if (window.protectedUrl) {
+            openTelegramLink(window.protectedUrl);
+        } else {
+            // Fetch the link again if not stored
+            getProtectedLink().then(url => {
+                if (url) {
+                    window.protectedUrl = url;
+                    openTelegramLink(url);
+                } else {
+                    alert('Error: Could not retrieve the group link.');
+                }
+            });
+        }
+    });
+});
 
-// Clean up on page unload
-window.addEventListener('beforeunload', () => {
-    clearInterval(matrixInterval);
+// Prevent accidental page unload
+window.addEventListener('beforeunload', (e) => {
+    if (isProcessingJoin || isAdShowing) {
+        e.preventDefault();
+        e.returnValue = 'Are you sure you want to leave? The verification process is still in progress.';
+        return 'Are you sure you want to leave? The verification process is still in progress.';
+    }
 });
 </script>
 </body>
