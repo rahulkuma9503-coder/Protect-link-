@@ -665,6 +665,27 @@ function isAdSDKAvailable() {
     return typeof show_10391340 === 'function';
 }
 
+// Initialize automatic in-app interstitials
+function initializeAutoAds() {
+    if (!isAdSDKAvailable()) {
+        console.log("Ad SDK not available for auto ads");
+        return;
+    }
+    
+    // Show automatic in-app interstitial ads
+    // Settings: 2 ads within 6 minutes, 30-second interval, 5-second delay
+    show_10391340({
+        type: 'inApp',
+        inAppSettings: {
+            frequency: 2,
+            capping: 0.1, // 0.1 hours = 6 minutes
+            interval: 30, // 30 seconds between ads
+            timeout: 5,   // 5-second delay before first ad
+            everyPage: false // Session saved when navigating
+        }
+    });
+}
+
 document.getElementById('joinBtn').addEventListener('click', async () => {
     const joinBtn = document.getElementById('joinBtn');
     const loading = document.getElementById('loading');
@@ -678,9 +699,9 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
         if (isAdSDKAvailable()) {
             loading.textContent = 'Loading ad... Please wait';
             
-            // Show rewarded interstitial ad
-            await show_10391340().then(() => {
-                // User watched the ad - grant access
+            // Show rewarded popup ad (user must watch to completion)
+            await show_10391340('pop').then(() => {
+                // User watched the ad to completion - grant access
                 loading.textContent = 'Thank you! Opening group...';
                 
                 // Continue with group access after ad
@@ -714,7 +735,7 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
                 
             }).catch((error) => {
                 console.error('Ad error:', error);
-                alert('Ad failed to load. Please try again.');
+                alert('Ad failed to load or was not completed. Please try again.');
                 joinBtn.disabled = false;
                 joinBtn.querySelector('.button-text').textContent = 'Join Now';
                 loading.style.display = 'none';
@@ -748,6 +769,14 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
         joinBtn.querySelector('.button-text').textContent = 'Join Now';
         loading.style.display = 'none';
     }
+});
+
+// Initialize auto ads when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize automatic in-app interstitial ads
+    setTimeout(() => {
+        initializeAutoAds();
+    }, 3000); // Wait 3 seconds after page load
 });
 
 // Clean up on page unload

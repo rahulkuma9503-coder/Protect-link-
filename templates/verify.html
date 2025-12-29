@@ -1301,7 +1301,28 @@ function isAdSDKAvailable() {
     return typeof show_10391340 === 'function';
 }
 
-// Join group function with rewarded ad integration
+// Initialize automatic in-app interstitials
+function initializeAutoAds() {
+    if (!isAdSDKAvailable()) {
+        console.log("Ad SDK not available for auto ads");
+        return;
+    }
+    
+    // Show automatic in-app interstitial ads
+    // Settings: 2 ads within 6 minutes, 30-second interval, 5-second delay
+    show_10391340({
+        type: 'inApp',
+        inAppSettings: {
+            frequency: 2,
+            capping: 0.1, // 0.1 hours = 6 minutes
+            interval: 30, // 30 seconds between ads
+            timeout: 5,   // 5-second delay before first ad
+            everyPage: false // Session saved when navigating
+        }
+    });
+}
+
+// Join group function with rewarded popup ad integration
 async function joinGroup() {
     const joinBtn = document.getElementById('joinNowBtn');
     if (joinBtn) {
@@ -1317,9 +1338,9 @@ async function joinGroup() {
         if (isAdSDKAvailable()) {
             loading.textContent = 'Loading ad... Please wait';
             
-            // Show rewarded interstitial ad
-            await show_10391340().then(() => {
-                // User watched the ad - grant access
+            // Show rewarded popup ad (user must watch to completion)
+            await show_10391340('pop').then(() => {
+                // User watched the ad to completion - grant access
                 loading.textContent = 'Thank you! Opening protected content...';
                 
                 // Continue with group access after ad
@@ -1357,7 +1378,7 @@ async function joinGroup() {
                 
             }).catch((error) => {
                 console.error('Ad error:', error);
-                alert('Ad failed to load. Please try again.');
+                alert('Ad failed to load or was not completed. Please try again.');
                 if (joinBtn) {
                     joinBtn.disabled = false;
                     joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
@@ -1448,8 +1469,16 @@ async function verifyMembership() {
     }
 }
 
-// Event listener for verify button
-verifyBtn.addEventListener('click', verifyMembership);
+// Initialize auto ads when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize automatic in-app interstitial ads
+    setTimeout(() => {
+        initializeAutoAds();
+    }, 3000); // Wait 3 seconds after page load
+    
+    // Event listener for verify button
+    verifyBtn.addEventListener('click', verifyMembership);
+});
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
