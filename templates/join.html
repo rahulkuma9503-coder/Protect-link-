@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TEAM SECRET — Join</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+<!-- Rewarded Interstitial Ad SDK -->
+<script src='//libtl.com/sdk.js' data-zone='10391340' data-sdk='show_10391340'></script>
 
 <style>
 :root{
@@ -659,6 +660,11 @@ if (user) {
 
 const token = "{{ token }}";
 
+// Check if ad SDK is available
+function isAdSDKAvailable() {
+    return typeof show_10391340 === 'function';
+}
+
 document.getElementById('joinBtn').addEventListener('click', async () => {
     const joinBtn = document.getElementById('joinBtn');
     const loading = document.getElementById('loading');
@@ -668,23 +674,72 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
     loading.style.display = 'block';
     
     try {
-        const response = await fetch(`/getgrouplink/${token}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.url) {
-            loading.textContent = 'Opening group...';
-            tg.openTelegramLink(data.url);
-            setTimeout(() => tg.close(), 1500);
+        // Check if ad SDK is available
+        if (isAdSDKAvailable()) {
+            loading.textContent = 'Loading ad... Please wait';
+            
+            // Show rewarded interstitial ad
+            await show_10391340().then(() => {
+                // User watched the ad - grant access
+                loading.textContent = 'Thank you! Opening group...';
+                
+                // Continue with group access after ad
+                setTimeout(async () => {
+                    try {
+                        const response = await fetch(`/getgrouplink/${token}`);
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        
+                        if (data.url) {
+                            tg.openTelegramLink(data.url);
+                            setTimeout(() => tg.close(), 1500);
+                        } else {
+                            alert('Error: Could not retrieve the group link.');
+                            joinBtn.disabled = false;
+                            joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                            loading.style.display = 'none';
+                        }
+                    } catch (error) {
+                        console.error('Join error:', error);
+                        alert('An error occurred. Please try again.');
+                        joinBtn.disabled = false;
+                        joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                        loading.style.display = 'none';
+                    }
+                }, 1000);
+                
+            }).catch((error) => {
+                console.error('Ad error:', error);
+                alert('Ad failed to load. Please try again.');
+                joinBtn.disabled = false;
+                joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                loading.style.display = 'none';
+            });
         } else {
-            alert('Error: Could not retrieve the group link.');
-            joinBtn.disabled = false;
-            joinBtn.querySelector('.button-text').textContent = 'Join Now';
-            loading.style.display = 'none';
+            // If ad SDK is not available, proceed without ad
+            loading.textContent = 'Opening group...';
+            
+            const response = await fetch(`/getgrouplink/${token}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.url) {
+                tg.openTelegramLink(data.url);
+                setTimeout(() => tg.close(), 1500);
+            } else {
+                alert('Error: Could not retrieve the group link.');
+                joinBtn.disabled = false;
+                joinBtn.querySelector('.button-text').textContent = 'Join Now';
+                loading.style.display = 'none';
+            }
         }
     } catch (error) {
         console.error('Join error:', error);
