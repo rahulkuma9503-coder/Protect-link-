@@ -6,8 +6,6 @@
 <title>TEAM SECRET — Verification</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<!-- Rewarded Interstitial Ad SDK -->
-<script src='//libtl.com/sdk.js' data-zone='10391340' data-sdk='show_10391340'></script>
 
 <style>
 :root{
@@ -507,33 +505,6 @@ h1{
   box-shadow:0 0 40px rgba(255,215,0,0.7), 0 0 60px rgba(255,215,0,0.5);
 }
 
-/* Skip Ad Button */
-.skip-ad-button {
-  padding: 12px 25px;
-  font-size: 1em;
-  border-radius: 50px;
-  border: 2px solid #ff8c00;
-  background: linear-gradient(135deg, rgba(255, 140, 0, 0.3), rgba(255, 69, 0, 0.3));
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 0 15px rgba(255, 140, 0, 0.5);
-  display: none;
-  margin-top: 10px;
-}
-
-.skip-ad-button:hover {
-  background: linear-gradient(135deg, rgba(255, 140, 0, 0.5), rgba(255, 69, 0, 0.5));
-  transform: translateY(-2px);
-  box-shadow: 0 0 25px rgba(255, 140, 0, 0.7);
-}
-
 /* Channels List */
 .channels-container {
   width: 100%;
@@ -875,7 +846,7 @@ h1{
 }
 
 .channels-list::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink));
+  background: linear-gradient(to bottom, var(--neon-purple), var(--neon-pink);
 }
 
 /* Responsive */
@@ -1008,11 +979,6 @@ h1{
         <div id="channels-list" class="channels-list"></div>
       </div>
       
-      <!-- Skip Ad Button -->
-      <button id="skipAdBtn" class='skip-ad-button'>
-        <span class='button-text'>Skip Ad & Access Content</span>
-      </button>
-      
       <!-- Action Buttons -->
       <div id="action-buttons" class='button-container'></div>
     </div>
@@ -1041,7 +1007,6 @@ const progressPercentage = document.getElementById('progress-percentage');
 const channelsList = document.getElementById('channels-list');
 const loading = document.getElementById('loading');
 const verifyBtn = document.getElementById('verifyBtn');
-const skipAdBtn = document.getElementById('skipAdBtn');
 
 // Initialize Telegram WebApp
 tg.ready();
@@ -1119,7 +1084,6 @@ function showLoading() {
     resultSection.style.display = 'none';
     channelsContainer.style.display = 'none';
     progressContainer.style.display = 'none';
-    skipAdBtn.style.display = 'none';
     loading.style.display = 'block';
 }
 
@@ -1325,40 +1289,22 @@ function resetToInitialState() {
     resultSection.style.display = 'none';
     channelsContainer.style.display = 'none';
     progressContainer.style.display = 'none';
-    skipAdBtn.style.display = 'none';
     initialState.style.display = 'flex';
     verifyBtn.disabled = false;
     verifyBtn.querySelector('.button-text').textContent = 'Verify Membership';
 }
 
-// Check if ad SDK is available
-function isAdSDKAvailable() {
-    return typeof show_10391340 === 'function';
-}
-
-// Initialize automatic in-app interstitials
-function initializeAutoAds() {
-    if (!isAdSDKAvailable()) {
-        console.log("Ad SDK not available for auto ads");
-        return;
+// Join group function
+async function joinGroup() {
+    const joinBtn = document.getElementById('joinNowBtn');
+    if (joinBtn) {
+        joinBtn.disabled = true;
+        joinBtn.querySelector('.button-text').textContent = 'Loading...';
     }
     
-    // Show automatic in-app interstitial ads
-    // Settings: 2 ads within 6 minutes, 30-second interval, 5-second delay
-    show_10391340({
-        type: 'inApp',
-        inAppSettings: {
-            frequency: 2,
-            capping: 0.1, // 0.1 hours = 6 minutes
-            interval: 30, // 30 seconds between ads
-            timeout: 5,   // 5-second delay before first ad
-            everyPage: false // Session saved when navigating
-        }
-    });
-}
-
-// Function to get the protected link
-async function getProtectedLink() {
+    loading.style.display = 'block';
+    loading.textContent = 'Opening protected content...';
+    
     try {
         const response = await fetch(`/getgrouplink/${token}`);
         
@@ -1367,49 +1313,10 @@ async function getProtectedLink() {
         }
         
         const data = await response.json();
-        return data.url;
-    } catch (error) {
-        console.error('Failed to get protected link:', error);
-        return null;
-    }
-}
-
-// Function to open Telegram link
-function openTelegramLink(url) {
-    if (url) {
-        tg.openTelegramLink(url);
-        setTimeout(() => {
-            tg.close();
-        }, 1500);
-        return true;
-    }
-    return false;
-}
-
-// Function to directly access without ad
-async function accessWithoutAd() {
-    const joinBtn = document.getElementById('joinNowBtn');
-    
-    loading.style.display = 'block';
-    loading.textContent = 'Opening protected content...';
-    skipAdBtn.style.display = 'none';
-    
-    try {
-        const groupUrl = await getProtectedLink();
         
-        if (groupUrl) {
-            setTimeout(() => {
-                const opened = openTelegramLink(groupUrl);
-                if (!opened) {
-                    // Fallback: Show link
-                    alert(`Please join: ${groupUrl}`);
-                    if (joinBtn) {
-                        joinBtn.disabled = false;
-                        joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-                    }
-                    loading.style.display = 'none';
-                }
-            }, 500);
+        if (data.url) {
+            tg.openTelegramLink(data.url);
+            setTimeout(() => tg.close(), 1500);
         } else {
             alert('Error: Could not retrieve the protected link.');
             if (joinBtn) {
@@ -1419,118 +1326,13 @@ async function accessWithoutAd() {
             loading.style.display = 'none';
         }
     } catch (error) {
-        console.error('Access error:', error);
+        console.error('Join error:', error);
         alert('An error occurred. Please try again.');
         if (joinBtn) {
             joinBtn.disabled = false;
             joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
         }
         loading.style.display = 'none';
-    }
-}
-
-// Join group function with rewarded popup ad integration
-async function joinGroup() {
-    const joinBtn = document.getElementById('joinNowBtn');
-    
-    if (joinBtn) {
-        joinBtn.disabled = true;
-        joinBtn.querySelector('.button-text').textContent = 'Loading...';
-    }
-    
-    loading.style.display = 'block';
-    loading.textContent = 'Preparing access...';
-    
-    // Show skip button after 10 seconds
-    const skipTimer = setTimeout(() => {
-        skipAdBtn.style.display = 'block';
-    }, 10000);
-    
-    try {
-        // Check if ad SDK is available
-        if (isAdSDKAvailable()) {
-            loading.textContent = 'Loading ad... Please wait 5-10 seconds';
-            
-            // Show rewarded popup ad with timeout
-            try {
-                // Try to show ad with 25 second timeout
-                const adPromise = new Promise((resolve, reject) => {
-                    // Timeout after 25 seconds
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Ad timeout after 25 seconds'));
-                    }, 25000);
-                    
-                    show_10391340('pop').then(() => {
-                        clearTimeout(timeout);
-                        resolve(true);
-                    }).catch(error => {
-                        clearTimeout(timeout);
-                        reject(error);
-                    });
-                });
-                
-                await adPromise;
-                
-                // Ad completed successfully
-                clearTimeout(skipTimer);
-                skipAdBtn.style.display = 'none';
-                loading.textContent = 'Thank you! Opening protected content...';
-                
-            } catch (adError) {
-                console.error('Ad error:', adError);
-                // If ad fails, just continue without it
-                clearTimeout(skipTimer);
-                skipAdBtn.style.display = 'none';
-                loading.textContent = 'Opening protected content...';
-            }
-        }
-        
-        // Get the protected link (whether ad played or not)
-        const groupUrl = await getProtectedLink();
-        
-        if (groupUrl) {
-            setTimeout(() => {
-                const opened = openTelegramLink(groupUrl);
-                if (!opened) {
-                    // Fallback: Show link
-                    alert(`Please join: ${groupUrl}`);
-                    if (joinBtn) {
-                        joinBtn.disabled = false;
-                        joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-                    }
-                    loading.style.display = 'none';
-                }
-            }, 1000);
-        } else {
-            alert('Error: Could not retrieve the protected link.');
-            if (joinBtn) {
-                joinBtn.disabled = false;
-                joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-            }
-            loading.style.display = 'none';
-        }
-        
-    } catch (error) {
-        console.error('Join error:', error);
-        clearTimeout(skipTimer);
-        
-        // Try to get protected link even if everything else fails
-        try {
-            const groupUrl = await getProtectedLink();
-            if (groupUrl) {
-                alert(`Please join: ${groupUrl}`);
-            }
-        } catch (e) {
-            console.error('Failed to get protected link:', e);
-            alert('An error occurred. Please try again.');
-        }
-        
-        if (joinBtn) {
-            joinBtn.disabled = false;
-            joinBtn.querySelector('.button-text').textContent = 'Access Protected Content';
-        }
-        loading.style.display = 'none';
-        skipAdBtn.style.display = 'none';
     }
 }
 
@@ -1582,19 +1384,8 @@ async function verifyMembership() {
     }
 }
 
-// Initialize auto ads when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize automatic in-app interstitial ads
-    setTimeout(() => {
-        initializeAutoAds();
-    }, 3000); // Wait 3 seconds after page load
-    
-    // Event listener for verify button
-    verifyBtn.addEventListener('click', verifyMembership);
-    
-    // Event listener for skip ad button
-    skipAdBtn.addEventListener('click', accessWithoutAd);
-});
+// Event listener for verify button
+verifyBtn.addEventListener('click', verifyMembership);
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
