@@ -75,6 +75,8 @@ def reset_and_set_commands():
             {"command": "start", "description": "🚀 Start the bot"},
             {"command": "protect", "description": "🔗 Create protected link"},
             {"command": "revoke", "description": "❌ Revoke active links"},
+            {"command": "broadcast", "description": "📢 Broadcast (Admin)"},
+            {"command": "stats", "description": "📊 Statistics (Admin)"},
             {"command": "help", "description": "📖 Show help guide"}
         ]
         
@@ -83,6 +85,7 @@ def reset_and_set_commands():
         
         if response.status_code == 200:
             logger.info("✅ Bot commands updated successfully")
+            logger.info(f"✅ Commands set: {[cmd['command'] for cmd in commands]}")
         else:
             logger.error(f"❌ Failed to update commands: {response.text}")
             
@@ -1111,7 +1114,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"• 🗄️ Database: 🟢 Operational\n"
         f"• 🤖 Bot: 🟢 Online\n"
         f"• ⚡ Uptime: 100%\n"
-        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-d %H:%M:%S')}",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -1182,6 +1185,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• `/start` - Start the bot\n"
         "• `/protect https://t.me/channel` - Create secure link\n"
         "• `/revoke` - Revoke access\n"
+        "• `/broadcast` - Broadcast message (Admin)\n"
+        "• `/stats` - View statistics (Admin)\n"
         "• `/help` - This message\n\n"
         "🔒 *How to Use:*\n"
         "1. Use `/protect https://t.me/yourchannel`\n"
