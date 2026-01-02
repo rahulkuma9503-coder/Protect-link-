@@ -4,3 +4,4 @@ uvicorn[standard]
 jinja2
 pymongo
 dnspython
+requests==2.32.5
