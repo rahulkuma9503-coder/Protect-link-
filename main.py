@@ -5,6 +5,7 @@ import base64
 import asyncio
 import datetime
 import io
+import requests  # Added import
 from typing import Optional, List, Dict, Any
 from pymongo import MongoClient
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -58,6 +59,35 @@ def init_db():
     except Exception as e:
         logger.error(f"❌ MongoDB error: {e}")
         raise
+
+def reset_and_set_commands():
+    """Reset and set premium-style bot commands."""
+    try:
+        bot_token = os.environ.get("TELEGRAM_TOKEN")
+        if not bot_token:
+            logger.error("❌ TELEGRAM_TOKEN not found in environment")
+            return
+        
+        url = f"https://api.telegram.org/bot{bot_token}/setMyCommands"
+        
+        # New premium-style commands
+        commands = [
+            {"command": "start", "description": "🚀 Start the bot"},
+            {"command": "protect", "description": "🔗 Create protected link"},
+            {"command": "revoke", "description": "❌ Revoke active links"},
+            {"command": "help", "description": "📖 Show help guide"}
+        ]
+        
+        # Set new commands
+        response = requests.post(url, json={"commands": commands})
+        
+        if response.status_code == 200:
+            logger.info("✅ Bot commands updated successfully")
+        else:
+            logger.error(f"❌ Failed to update commands: {response.text}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error setting bot commands: {e}")
 
 async def get_channel_invite_link(context: ContextTypes.DEFAULT_TYPE, channel_id: str) -> str:
     """Get or create an invite link for a channel."""
@@ -1205,6 +1235,9 @@ async def on_startup():
             raise Exception(f"Missing {var}")
     
     init_db()
+    
+    # Set bot commands on startup
+    reset_and_set_commands()
     
     await telegram_bot_app.initialize()
     await telegram_bot_app.start()
