@@ -5,7 +5,6 @@ import base64
 import asyncio
 import datetime
 import io
-import requests
 from typing import Optional, List, Dict, Any
 from pymongo import MongoClient
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -38,9 +37,6 @@ users_collection = db["users"]
 broadcast_collection = db["broadcast_history"]
 channels_collection = db["channels"]
 
-# Add ad tracking collection
-ad_impressions_collection = db["ad_impressions"]
-
 def init_db():
     """Verifies the MongoDB connection."""
     try:
@@ -52,45 +48,10 @@ def init_db():
         links_collection.create_index("created_by")
         links_collection.create_index("active")
         channels_collection.create_index("channel_id", unique=True)
-        # Add index for ad impressions
-        ad_impressions_collection.create_index([("user_id", 1), ("timestamp", -1)])
-        ad_impressions_collection.create_index("ad_type")
         logger.info("✅ Database indexes created")
     except Exception as e:
         logger.error(f"❌ MongoDB error: {e}")
         raise
-
-def reset_and_set_commands():
-    """Reset and set premium-style bot commands."""
-    try:
-        bot_token = os.environ.get("TELEGRAM_TOKEN")
-        if not bot_token:
-            logger.error("❌ TELEGRAM_TOKEN not found in environment")
-            return
-        
-        url = f"https://api.telegram.org/bot{bot_token}/setMyCommands"
-        
-        # New premium-style commands
-        commands = [
-            {"command": "start", "description": "🚀 Start the bot"},
-            {"command": "protect", "description": "🔗 Create protected link"},
-            {"command": "revoke", "description": "❌ Revoke active links"},
-            {"command": "broadcast", "description": "📢 Broadcast (Admin)"},
-            {"command": "stats", "description": "📊 Statistics (Admin)"},
-            {"command": "help", "description": "📖 Show help guide"}
-        ]
-        
-        # Set new commands
-        response = requests.post(url, json={"commands": commands})
-        
-        if response.status_code == 200:
-            logger.info("✅ Bot commands updated successfully")
-            logger.info(f"✅ Commands set: {[cmd['command'] for cmd in commands]}")
-        else:
-            logger.error(f"❌ Failed to update commands: {response.text}")
-            
-    except Exception as e:
-        logger.error(f"❌ Error setting bot commands: {e}")
 
 async def get_channel_invite_link(context: ContextTypes.DEFAULT_TYPE, channel_id: str) -> str:
     """Get or create an invite link for a channel."""
@@ -196,6 +157,57 @@ def format_channel_name(channel_id: str) -> str:
     else:
         return channel_id
 
+async def get_channel_title(bot, channel_id: str) -> str:
+    """Get the actual title/name of a channel."""
+    try:
+        # Convert channel_id to appropriate format
+        try:
+            chat_id = int(channel_id)
+        except ValueError:
+            if channel_id.startswith('@'):
+                chat_id = channel_id
+            else:
+                chat_id = f"@{channel_id}"
+        
+        # Get chat information
+        chat = await bot.get_chat(chat_id)
+        
+        # Return the title
+        return chat.title or format_channel_name(channel_id)
+    except Exception as e:
+        logger.error(f"Failed to get channel title for {channel_id}: {e}")
+        return format_channel_name(channel_id)
+
+async def get_channel_invite_links(context: ContextTypes.DEFAULT_TYPE, channels: List[str]) -> List[Dict[str, str]]:
+    """Get invite links for multiple channels."""
+    channel_links = []
+    
+    for channel in channels:
+        try:
+            invite_link = await get_channel_invite_link(context, channel)
+            channel_links.append({
+                "channel": channel,
+                "invite_link": invite_link,
+                "display_name": format_channel_name(channel)
+            })
+        except Exception as e:
+            logger.error(f"Failed to get invite link for {channel}: {e}")
+            # Add fallback link
+            if channel.startswith('-100'):
+                fallback_link = f"https://t.me/c/{channel[4:]}"
+            elif channel.startswith('@'):
+                fallback_link = f"https://t.me/{channel[1:]}"
+            else:
+                fallback_link = f"https://t.me/{channel}"
+            
+            channel_links.append({
+                "channel": channel,
+                "invite_link": fallback_link,
+                "display_name": format_channel_name(channel)
+            })
+    
+    return channel_links
+
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user is member of ALL support channels."""
     support_channels = get_support_channels()
@@ -204,50 +216,20 @@ async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_T
     
     for channel in support_channels:
         try:
-            # Convert channel string to appropriate chat_id format
-            if channel.startswith('@'):
-                # Public channel with username
-                chat_id = channel
-            elif channel.startswith('-100'):
-                # Private channel/group with ID
+            try:
                 chat_id = int(channel)
-            else:
-                # Try to handle as username or ID
-                try:
-                    chat_id = int(channel)
-                except ValueError:
-                    # Assume it's a username without @
+            except ValueError:
+                if channel.startswith('@'):
+                    chat_id = channel
+                else:
                     chat_id = f"@{channel}"
             
-            # Try to get chat member
-            try:
-                chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                
-                # Check if user is a member
-                if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
-                    continue
-                else:
-                    return False
-                    
-            except BadRequest as e:
-                error_msg = str(e).lower()
-                
-                # If bot can't see user (not admin), we need alternative approach
-                if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
-                    # For public channels, we can assume user can join
-                    if channel.startswith('@'):
-                        continue
-                    
-                    # For private groups, user needs to join
-                    return False
-                    
-                elif "user not participant" in error_msg:
-                    return False
-                else:
-                    return False
-                    
+            chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if chat_member.status not in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                logger.info(f"User {user_id} is not member of {channel}")
+                return False
         except Exception as e:
-            logger.error(f"Error checking {channel}: {e}")
+            logger.error(f"❌ Channel check error for {channel}: {e}")
             return False
     
     return True
@@ -263,7 +245,6 @@ async def verify_user_membership(user_id: int) -> bool:
     try:
         bot_token = os.environ.get("TELEGRAM_TOKEN")
         if not bot_token:
-            logger.error("❌ TELEGRAM_TOKEN not found")
             return False
             
         # Create a bot instance
@@ -271,45 +252,24 @@ async def verify_user_membership(user_id: int) -> bool:
         
         for channel in support_channels:
             try:
-                # Convert channel string to appropriate chat_id format
-                if channel.startswith('@'):
-                    chat_id = channel
-                elif channel.startswith('-100'):
+                try:
                     chat_id = int(channel)
-                else:
-                    try:
-                        chat_id = int(channel)
-                    except ValueError:
+                except ValueError:
+                    if channel.startswith('@'):
+                        chat_id = channel
+                    else:
                         chat_id = f"@{channel}"
                 
-                # Try to check membership
                 try:
                     chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                    
-                    if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
-                        continue
-                    else:
+                    if chat_member.status not in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                        logger.info(f"User {user_id} is not member of {channel}")
                         return False
-                        
-                except BadRequest as e:
-                    error_msg = str(e).lower()
-                    
-                    # Handle cases where bot can't check directly
-                    if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
-                        # For public channels, assume user can join
-                        if channel.startswith('@'):
-                            continue
-                        
-                        # For private, user needs to join
-                        return False
-                        
-                    elif "user not participant" in error_msg:
-                        return False
-                    else:
-                        return False
-                        
+                except Exception as e:
+                    logger.error(f"Channel check error for {channel}: {e}")
+                    return False
             except Exception as e:
-                logger.error(f"Error processing {channel}: {e}")
+                logger.error(f"Error processing channel {channel}: {e}")
                 return False
                 
         return True
@@ -317,8 +277,48 @@ async def verify_user_membership(user_id: int) -> bool:
         logger.error(f"Bot initialization error: {e}")
         return False
 
+async def get_channel_photo_url(bot, channel_id: str) -> Optional[str]:
+    """Get channel photo and return a proxied URL."""
+    try:
+        # Check database first
+        channel_data = channels_collection.find_one({"channel_id": channel_id})
+        if channel_data and channel_data.get("photo_id"):
+            # Return our proxy URL
+            return f"{os.environ.get('RENDER_EXTERNAL_URL')}/channel_photo/{channel_id}"
+        
+        # Convert channel_id to appropriate format
+        try:
+            chat_id = int(channel_id)
+        except ValueError:
+            if channel_id.startswith('@'):
+                chat_id = channel_id
+            else:
+                chat_id = f"@{channel_id}"
+        
+        # Get chat information
+        chat = await bot.get_chat(chat_id)
+        
+        if chat.photo:
+            # Store photo file_id in database
+            channels_collection.update_one(
+                {"channel_id": channel_id},
+                {"$set": {
+                    "photo_id": chat.photo.big_file_id,
+                    "last_updated": datetime.datetime.now()
+                }},
+                upsert=True
+            )
+            
+            # Return our proxy URL
+            return f"{os.environ.get('RENDER_EXTERNAL_URL')}/channel_photo/{channel_id}"
+        
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get channel photo for {channel_id}: {e}")
+        return None
+
 async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
-    """Get channel information including membership status, invite links, channel titles."""
+    """Get channel information including membership status, invite links, channel titles, and logos."""
     support_channels = get_support_channels()
     if not support_channels:
         return {
@@ -346,27 +346,25 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
         
         for channel in support_channels:
             try:
-                # Convert channel ID
-                if channel.startswith('@'):
-                    chat_id = channel
-                elif channel.startswith('-100'):
+                try:
                     chat_id = int(channel)
-                else:
-                    try:
-                        chat_id = int(channel)
-                    except ValueError:
+                except ValueError:
+                    if channel.startswith('@'):
+                        chat_id = channel
+                    else:
                         chat_id = f"@{channel}"
                 
-                # Get chat info
-                chat_title = format_channel_name(channel)
-                invite_link = None
-                
+                # Get chat info and title
                 try:
                     chat = await bot.get_chat(chat_id)
                     chat_title = chat.title or format_channel_name(channel)
                     chat_username = getattr(chat, 'username', None)
                     
+                    # Get channel photo URL (using our proxy)
+                    logo_url = await get_channel_photo_url(bot, channel)
+                    
                     # Get or create invite link
+                    invite_link = None
                     if chat.invite_link:
                         invite_link = chat.invite_link
                     elif chat_username:
@@ -401,6 +399,7 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                     
                 except Exception as e:
                     logger.error(f"Failed to get chat info for {channel}: {e}")
+                    chat_title = format_channel_name(channel)
                     # Generate fallback link
                     if channel.startswith('-100'):
                         invite_link = f"https://t.me/c/{channel[4:]}"
@@ -410,40 +409,30 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                         invite_link = f"https://t.me/{channel}"
                 
                 # Check membership
-                is_channel_member = False
-                
                 try:
                     chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                    
-                    if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
-                        is_channel_member = True
-                        
-                except BadRequest as e:
-                    error_msg = str(e).lower()
-                    
-                    # Handle cases where bot can't check directly
-                    if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
-                        # For public channels, assume user can join
-                        if channel.startswith('@'):
-                            is_channel_member = True
-                        else:
-                            is_channel_member = False
-                    elif "user not participant" in error_msg:
-                        is_channel_member = False
-                    else:
-                        is_channel_member = False
+                    is_channel_member = chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
                 except Exception as e:
+                    logger.error(f"Failed to check membership for {channel}: {e}")
                     is_channel_member = False
                 
                 if not is_channel_member:
                     is_member = False
                 
+                # Try to get existing photo URL from database
+                if not logo_url:
+                    channel_data = channels_collection.find_one({"channel_id": channel})
+                    if channel_data and channel_data.get("photo_id"):
+                        logo_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/channel_photo/{channel}"
+                
                 channels_info.append({
                     "channel": channel,
-                    "channel_title": chat_title,
+                    "channel_title": chat_title,  # Actual channel title
                     "invite_link": invite_link,
                     "is_member": is_channel_member,
-                    "display_name": chat_title,
+                    "display_name": chat_title,  # Use actual title for display
+                    "username": chat_username if 'chat_username' in locals() else None,
+                    "logo_url": logo_url  # Add logo URL to the response
                 })
                 
             except Exception as e:
@@ -457,6 +446,7 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                     "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
                     "is_member": False,
                     "display_name": chat_title,
+                    "logo_url": None
                 })
                 is_member = False
         
@@ -483,6 +473,7 @@ async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
                 "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
                 "is_member": False,
                 "display_name": chat_title,
+                "logo_url": None
             })
         
         return {
@@ -511,61 +502,57 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         upsert=True
     )
     
-    # Check channel membership
+    # First check channel membership regardless of args
     support_channels = get_support_channels()
-    if support_channels:
-        # Use normal checking
-        is_member = await check_channel_membership(user_id, context)
+    if support_channels and not await check_channel_membership(user_id, context):
+        # Get channel info and invite links
+        channel_info = await get_channel_info_for_user(user_id)
         
-        if not is_member:
-            # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(user_id)
-            
-            # If there's a protected link argument, include it in callback data
-            if context.args:
-                encoded_id = context.args[0]
-                callback_data = f"check_join_{encoded_id}"
-            else:
-                callback_data = "check_join"
-            
-            # Create keyboard with separate buttons for each channel
-            keyboard = []
-            
-            # Add individual channel buttons
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            channel_count = len(support_channels)
-            if context.args:
-                message_text = (
-                    f"🔐 *This is a Protected Link*\n\n"
-                    f"Join our {channel_count} channel(s) first to access this link.\n"
-                    f"Then click 'Check Membership' below."
-                )
-            else:
-                message_text = (
-                    f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
-                    "Then click 'Check Membership' below."
-                )
-            
-            await update.message.reply_text(
-                message_text,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN if context.args else None
+        # If there's a protected link argument, include it in callback data
+        if context.args:
+            encoded_id = context.args[0]
+            callback_data = f"check_join_{encoded_id}"
+        else:
+            callback_data = "check_join"
+        
+        # Create keyboard with separate buttons for each channel
+        keyboard = []
+        
+        # Add individual channel buttons (split into rows of 2 for better layout)
+        for i in range(0, len(channel_info["channels"]), 2):
+            row_buttons = []
+            for j in range(2):
+                if i + j < len(channel_info["channels"]):
+                    channel = channel_info["channels"][i + j]
+                    button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                    row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+            if row_buttons:
+                keyboard.append(row_buttons)
+        
+        # Add check button
+        keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        channel_count = len(support_channels)
+        if context.args:
+            message_text = (
+                f"🔐 *This is a Protected Link*\n\n"
+                f"Join our {channel_count} channel(s) first to access this link.\n"
+                f"Then click 'Check Membership' below."
             )
-            return
+        else:
+            message_text = (
+                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+                "Then click 'Check Membership' below."
+            )
+        
+        await update.message.reply_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN if context.args else None
+        )
+        return
     
     # User is in all channels or no channels required
     
@@ -575,8 +562,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         link_data = links_collection.find_one({"_id": encoded_id, "active": True})
 
         if link_data:
-            # Include user_id in the WebApp URL for ad tracking
-            web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}&user_id={update.effective_user.id}"
+            # Use verification page instead of direct join
+            web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}"
             
             keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -590,9 +577,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text("❌ Link expired or revoked")
         return
     
-    # If no args, show welcome message
+    # If no args, show beautiful welcome message
     user_name = update.effective_user.first_name or "User"
     
+    # Create the beautiful welcome message
     welcome_msg = """╔──────── ✧ ────────╗
       Welcome {username}
 ╚──────── ✧ ────────╝
@@ -619,13 +607,13 @@ I help you keep your channel links safe & secure.
         # Get channel info and create individual buttons
         channel_info = await get_channel_info_for_user(user_id)
         
-        # Add individual channel buttons
+        # Add individual channel buttons (split into rows of 2)
         for i in range(0, len(channel_info["channels"]), 2):
             row_buttons = []
             for j in range(2):
                 if i + j < len(channel_info["channels"]):
                     channel = channel_info["channels"][i + j]
-                    button_text = f"🌟 {channel['display_name'][:15]}"
+                    button_text = f"🌟 {channel['display_name'][:15]}"  # Limit text length
                     row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
             if row_buttons:
                 keyboard.append(row_buttons)
@@ -642,8 +630,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     
     if query.data == "check_join":
-        is_member = await check_channel_membership(query.from_user.id, context)
-        if is_member:
+        if await check_channel_membership(query.from_user.id, context):
             await query.message.edit_text(
                 "✅ Verified!\n"
                 "You can now use the bot.\n\n"
@@ -656,14 +643,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Handle check join for protected links
         encoded_id = query.data.replace("check_join_", "")
         
-        is_member = await check_channel_membership(query.from_user.id, context)
-        if is_member:
+        if await check_channel_membership(query.from_user.id, context):
             # User has joined, show protected link
             link_data = links_collection.find_one({"_id": encoded_id, "active": True})
             
             if link_data:
-                # Include user_id in the WebApp URL for ad tracking
-                web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}&user_id={query.from_user.id}"
+                web_app_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/verify?token={encoded_id}"
                 
                 keyboard = [[InlineKeyboardButton("🔗 Join Group", web_app=WebAppInfo(url=web_app_url))]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -700,37 +685,35 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Create protected link for ANY Telegram link (group or channel)."""
     # Check channel membership
     support_channels = get_support_channels()
-    if support_channels:
-        is_member = await check_channel_membership(update.effective_user.id, context)
-        if not is_member:
-            # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(update.effective_user.id)
-            
-            # Create keyboard with separate buttons for each channel
-            keyboard = []
-            
-            # Add individual channel buttons
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            channel_count = len(support_channels)
-            await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
-                "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
-            )
-            return
+    if support_channels and not await check_channel_membership(update.effective_user.id, context):
+        # Get channel info and invite links
+        channel_info = await get_channel_info_for_user(update.effective_user.id)
+        
+        # Create keyboard with separate buttons for each channel
+        keyboard = []
+        
+        # Add individual channel buttons (split into rows of 2)
+        for i in range(0, len(channel_info["channels"]), 2):
+            row_buttons = []
+            for j in range(2):
+                if i + j < len(channel_info["channels"]):
+                    channel = channel_info["channels"][i + j]
+                    button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                    row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+            if row_buttons:
+                keyboard.append(row_buttons)
+        
+        # Add check button
+        keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        channel_count = len(support_channels)
+        await update.message.reply_text(
+            f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+            "Then click 'Check Membership' below.",
+            reply_markup=reply_markup
+        )
+        return
     
     if not context.args or not context.args[0].startswith("https://t.me/"):
         await update.message.reply_text(
@@ -745,7 +728,7 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     telegram_link = context.args[0]
     
-    # Validate the link
+    # Validate the link (basic check)
     if not telegram_link.startswith("https://t.me/"):
         await update.message.reply_text("❌ Invalid link. Must start with https://t.me/")
         return
@@ -779,6 +762,7 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Formatted message with markdown for easy copying
     await update.message.reply_text(
         f"✅ *Protected Link Created!*\n\n"
         f"🔑 *Link ID:* `{short_id}`\n"
@@ -800,37 +784,35 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Revoke a link."""
     # Check channel membership
     support_channels = get_support_channels()
-    if support_channels:
-        is_member = await check_channel_membership(update.effective_user.id, context)
-        if not is_member:
-            # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(update.effective_user.id)
-            
-            # Create keyboard with separate buttons for each channel
-            keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            channel_count = len(support_channels)
-            await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
-                "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
-            )
-            return
+    if support_channels and not await check_channel_membership(update.effective_user.id, context):
+        # Get channel info and invite links
+        channel_info = await get_channel_info_for_user(update.effective_user.id)
+        
+        # Create keyboard with separate buttons for each channel
+        keyboard = []
+        
+        # Add individual channel buttons (split into rows of 2)
+        for i in range(0, len(channel_info["channels"]), 2):
+            row_buttons = []
+            for j in range(2):
+                if i + j < len(channel_info["channels"]):
+                    channel = channel_info["channels"][i + j]
+                    button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                    row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+            if row_buttons:
+                keyboard.append(row_buttons)
+        
+        # Add check button
+        keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        channel_count = len(support_channels)
+        await update.message.reply_text(
+            f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+            "Then click 'Check Membership' below.",
+            reply_markup=reply_markup
+        )
+        return
     
     if not context.args:
         # Show user's active links
@@ -1069,12 +1051,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     for result in total_clicks_result:
         total_clicks = result.get('total_clicks', 0)
     
-    # Get ad statistics
-    total_ad_impressions = ad_impressions_collection.count_documents({})
-    today_ads = ad_impressions_collection.count_documents({
-        "timestamp": {"$gte": today}
-    })
-    
     await update.message.reply_text(
         f"📊 *System Analytics Dashboard*\n\n"
         f"👥 *User Statistics*\n"
@@ -1085,14 +1061,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"• 🟢 Active Links: `{active_links}`\n"
         f"• 🆕 Created Today: `{new_links_today}`\n"
         f"• 👆 Total Clicks: `{total_clicks}`\n\n"
-        f"💰 *Ad Revenue Statistics*\n"
-        f"• 📱 Total Ad Impressions: `{total_ad_impressions}`\n"
-        f"• 📈 Today's Ads: `{today_ads}`\n\n"
         f"⚙️ *System Status*\n"
         f"• 🗄️ Database: 🟢 Operational\n"
         f"• 🤖 Bot: 🟢 Online\n"
         f"• ⚡ Uptime: 100%\n"
-        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-d %H:%M:%S')}",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -1102,37 +1075,35 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Check channel membership
     support_channels = get_support_channels()
-    if support_channels:
-        is_member = await check_channel_membership(user_id, context)
-        if not is_member:
-            # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(user_id)
-            
-            # Create keyboard with separate buttons for each channel
-            keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            channel_count = len(support_channels)
-            await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
-                "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
-            )
-            return
+    if support_channels and not await check_channel_membership(user_id, context):
+        # Get channel info and invite links
+        channel_info = await get_channel_info_for_user(user_id)
+        
+        # Create keyboard with separate buttons for each channel
+        keyboard = []
+        
+        # Add individual channel buttons (split into rows of 2)
+        for i in range(0, len(channel_info["channels"]), 2):
+            row_buttons = []
+            for j in range(2):
+                if i + j < len(channel_info["channels"]):
+                    channel = channel_info["channels"][i + j]
+                    button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                    row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+            if row_buttons:
+                keyboard.append(row_buttons)
+        
+        # Add check button
+        keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        channel_count = len(support_channels)
+        await update.message.reply_text(
+            f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+            "Then click 'Check Membership' below.",
+            reply_markup=reply_markup
+        )
+        return
     
     keyboard = []
     
@@ -1165,8 +1136,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• `/start` - Start the bot\n"
         "• `/protect https://t.me/channel` - Create secure link\n"
         "• `/revoke` - Revoke access\n"
-        "• `/broadcast` - Broadcast message (Admin)\n"
-        "• `/stats` - View statistics (Admin)\n"
         "• `/help` - This message\n\n"
         "🔒 *How to Use:*\n"
         "1. Use `/protect https://t.me/yourchannel`\n"
@@ -1211,38 +1180,33 @@ templates = Jinja2Templates(directory="templates")
 @app.on_event("startup")
 async def on_startup():
     """Start bot."""
-    logger.info("🚀 Starting bot...")
+    logger.info("Starting bot...")
     
     required_vars = ["TELEGRAM_TOKEN", "RENDER_EXTERNAL_URL"]
     for var in required_vars:
         if not os.environ.get(var):
-            logger.critical(f"❌ Missing {var}")
+            logger.critical(f"Missing {var}")
             raise Exception(f"Missing {var}")
     
     init_db()
-    
-    # Set bot commands on startup
-    reset_and_set_commands()
     
     await telegram_bot_app.initialize()
     await telegram_bot_app.start()
     
     webhook_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/{os.environ.get('TELEGRAM_TOKEN')}"
     await telegram_bot_app.bot.set_webhook(url=webhook_url)
-    logger.info(f"🌐 Webhook: {webhook_url}")
+    logger.info(f"Webhook: {webhook_url}")
     
     bot_info = await telegram_bot_app.bot.get_me()
-    logger.info(f"🤖 Bot: @{bot_info.username}")
+    logger.info(f"Bot: @{bot_info.username}")
     
-    # Test channel link generation
+    # Test channel link generation and get channel titles
     support_channels = get_support_channels()
     if support_channels:
-        logger.info(f"📋 Support channels: {support_channels}")
         for channel in support_channels:
             try:
                 invite_link = await get_channel_invite_link(telegram_bot_app, channel)
-                
-                # Get channel title
+                # Try to get channel title
                 try:
                     if channel.startswith('@'):
                         chat_id = channel
@@ -1250,22 +1214,20 @@ async def on_startup():
                         chat_id = int(channel)
                     
                     chat = await telegram_bot_app.bot.get_chat(chat_id)
-                    logger.info(f"📢 Support channel: {chat.title or channel}")
-                    logger.info(f"🔗 Invite link: {invite_link}")
+                    logger.info(f"Support channel: {chat.title or channel} - Invite: {invite_link}")
                 except:
-                    logger.info(f"📢 Support channel: {channel}")
-                    logger.info(f"🔗 Invite link: {invite_link}")
+                    logger.info(f"Support channel: {channel} - Invite: {invite_link}")
             except Exception as e:
-                logger.error(f"❌ Failed to process channel {channel}: {e}")
+                logger.error(f"Failed to generate channel link for {channel}: {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
     """Stop bot."""
-    logger.info("🛑 Stopping bot...")
+    logger.info("Stopping bot...")
     await telegram_bot_app.stop()
     await telegram_bot_app.shutdown()
     client.close()
-    logger.info("✅ Bot stopped")
+    logger.info("Bot stopped")
 
 @app.post("/{token}")
 async def telegram_webhook(request: Request, token: str):
@@ -1280,45 +1242,9 @@ async def telegram_webhook(request: Request, token: str):
     return Response(status_code=200)
 
 @app.get("/verify")
-async def verify_page(request: Request, token: str, user_id: Optional[int] = None):
-    """Verification page with ad support."""
-    # Validate token
-    link_data = links_collection.find_one({"_id": token, "active": True})
-    if not link_data:
-        raise HTTPException(status_code=404, detail="Link not found or expired")
-    
-    return templates.TemplateResponse(
-        "verify.html", 
-        {
-            "request": request, 
-            "token": token,
-            "user_id": user_id  # Pass user_id to template for tracking
-        }
-    )
-
-@app.post("/track_ad/{user_id}")
-async def track_ad_impression(user_id: int, ad_type: str = "inApp"):
-    """Track ad impressions for analytics."""
-    try:
-        ad_impressions_collection.insert_one({
-            "user_id": user_id,
-            "ad_type": ad_type,
-            "timestamp": datetime.datetime.now(),
-            "revenue_estimate": 0.01  # Estimated revenue per impression
-        })
-        
-        # Update user's last ad impression time
-        users_collection.update_one(
-            {"user_id": user_id},
-            {"$set": {"last_ad_impression": datetime.datetime.now()}},
-            upsert=True
-        )
-        
-        logger.info(f"Ad impression tracked for user {user_id}, type: {ad_type}")
-        return {"status": "success", "message": "Ad impression tracked"}
-    except Exception as e:
-        logger.error(f"Failed to track ad impression: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+async def verify_page(request: Request, token: str):
+    """Verification page."""
+    return templates.TemplateResponse("verify.html", {"request": request, "token": token})
 
 @app.get("/check_membership/{token}")
 async def check_membership_api(token: str, user_id: int):
@@ -1328,23 +1254,12 @@ async def check_membership_api(token: str, user_id: int):
     if not link_data:
         raise HTTPException(status_code=404, detail="Link not found")
     
-    # Track that user is checking membership (potential ad view)
-    try:
-        ad_impressions_collection.insert_one({
-            "user_id": user_id,
-            "ad_type": "verification_page_view",
-            "timestamp": datetime.datetime.now(),
-            "page": "verify"
-        })
-    except Exception as e:
-        logger.error(f"Failed to track page view: {e}")
-    
-    # Get channel membership info
+    # Get channel membership info WITH CHANNEL TITLES AND LOGOS
     channel_info = await get_channel_info_for_user(user_id)
     
     return {
         "is_member": channel_info["is_member"],
-        "channels": channel_info["channels"],
+        "channels": channel_info["channels"],  # Now includes channel_title and logo_url
         "channel_count": channel_info["channel_count"],
         "invite_link": channel_info["invite_link"]
     }
@@ -1356,18 +1271,7 @@ async def get_channel_photo(channel_id: str):
         # Get channel data from database
         channel_data = channels_collection.find_one({"channel_id": channel_id})
         if not channel_data or not channel_data.get("photo_id"):
-            # Return default Telegram logo
-            default_url = "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg"
-            import requests
-            response = requests.get(default_url)
-            return StreamingResponse(
-                io.BytesIO(response.content),
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "Content-Disposition": f"inline; filename=default_channel.svg"
-                }
-            )
+            raise HTTPException(status_code=404, detail="Channel photo not found")
         
         # Get bot instance
         from telegram import Bot
@@ -1389,18 +1293,7 @@ async def get_channel_photo(channel_id: str):
         )
     except Exception as e:
         logger.error(f"Failed to get channel photo for {channel_id}: {e}")
-        # Fallback to default
-        default_url = "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg"
-        import requests
-        response = requests.get(default_url)
-        return StreamingResponse(
-            io.BytesIO(response.content),
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Content-Disposition": "inline; filename=default_channel.svg"
-            }
-        )
+        raise HTTPException(status_code=404, detail="Channel photo not found")
 
 @app.get("/join")
 async def join_page(request: Request, token: str, user_id: int):
@@ -1413,36 +1306,16 @@ async def join_page(request: Request, token: str, user_id: int):
     # Check membership
     is_member = await verify_user_membership(user_id)
     if not is_member:
-        # Track failed join attempt (potential ad revenue lost)
-        try:
-            ad_impressions_collection.insert_one({
-                "user_id": user_id,
-                "ad_type": "failed_join_attempt",
-                "timestamp": datetime.datetime.now(),
-                "reason": "not_member"
-            })
-        except Exception as e:
-            logger.error(f"Failed to track failed join: {e}")
-        
         # Redirect to verification page
         raise HTTPException(status_code=303, detail="Not a member of support channels")
     
-    # Track successful join attempt (ad will be shown)
-    try:
-        ad_impressions_collection.insert_one({
-            "user_id": user_id,
-            "ad_type": "join_page_view",
-            "timestamp": datetime.datetime.now(),
-            "page": "join"
-        })
-    except Exception as e:
-        logger.error(f"Failed to track join page view: {e}")
+    # Increment clicks
+    links_collection.update_one(
+        {"_id": token},
+        {"$inc": {"clicks": 1}}
+    )
     
-    return templates.TemplateResponse("join.html", {
-        "request": request, 
-        "token": token,
-        "user_id": user_id  # Pass user_id for tracking
-    })
+    return templates.TemplateResponse("join.html", {"request": request, "token": token})
 
 @app.get("/getgrouplink/{token}")
 async def get_group_link(token: str):
@@ -1454,62 +1327,16 @@ async def get_group_link(token: str):
             {"_id": token},
             {"$inc": {"clicks": 1}}
         )
-        
-        # Track successful link access (after ad view)
         return {"url": link_data.get("telegram_link") or link_data.get("group_link")}
     else:
         raise HTTPException(status_code=404, detail="Link not found")
 
-@app.get("/ad_stats")
-async def get_ad_stats():
-    """Get ad statistics (admin only)."""
-    admin_id = int(os.environ.get("ADMIN_ID", 0))
-    
-    # You would need to implement authentication here
-    # For now, return basic stats
-    
-    today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    stats = {
-        "total_impressions": ad_impressions_collection.count_documents({}),
-        "today_impressions": ad_impressions_collection.count_documents({"timestamp": {"$gte": today}}),
-        "impressions_by_type": list(ad_impressions_collection.aggregate([
-            {"$group": {"_id": "$ad_type", "count": {"$sum": 1}}}
-        ])),
-        "estimated_revenue": ad_impressions_collection.count_documents({}) * 0.01,  # $0.01 per impression
-        "top_users": list(ad_impressions_collection.aggregate([
-            {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]))
-    }
-    
-    return stats
-
 @app.get("/")
 async def root():
     """Health check."""
-    try:
-        # Check MongoDB connection
-        client.admin.command('ismaster')
-        db_status = "🟢 Connected"
-    except:
-        db_status = "🔴 Disconnected"
-    
-    # Get basic stats
-    total_users = users_collection.count_documents({})
-    active_links = links_collection.count_documents({"active": True})
-    total_ads = ad_impressions_collection.count_documents({})
-    
     return {
         "status": "ok",
         "service": "LinkShield Pro",
-        "version": "2.1.0",
-        "time": datetime.datetime.now().isoformat(),
-        "database": db_status,
-        "stats": {
-            "total_users": total_users,
-            "active_links": active_links,
-            "total_ad_impressions": total_ads
-        }
+        "version": "2.0.0",
+        "time": datetime.datetime.now().isoformat()
     }
