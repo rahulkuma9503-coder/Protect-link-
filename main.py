@@ -197,12 +197,10 @@ def format_channel_name(channel_id: str) -> str:
         return channel_id
 
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """REAL-TIME CHECK: Check if user is member of ALL support channels."""
+    """Check if user is member of ALL support channels."""
     support_channels = get_support_channels()
     if not support_channels:
         return True
-    
-    logger.info(f"🔍 REAL-TIME CHECK: Checking membership for user {user_id}")
     
     for channel in support_channels:
         try:
@@ -221,58 +219,46 @@ async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_T
                     # Assume it's a username without @
                     chat_id = f"@{channel}"
             
-            logger.info(f"🔍 Checking user {user_id} in {channel} (chat_id: {chat_id})")
-            
-            # REAL-TIME: Try to get chat member from Telegram API
+            # Try to get chat member
             try:
                 chat_member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                logger.info(f"📊 User {user_id} status in {channel}: {chat_member.status}")
                 
                 # Check if user is a member
                 if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
-                    logger.info(f"✅ User {user_id} is a member of {channel}")
                     continue
                 else:
-                    logger.warning(f"❌ User {user_id} is not a member of {channel}. Status: {chat_member.status}")
                     return False
                     
             except BadRequest as e:
                 error_msg = str(e).lower()
-                logger.error(f"⚠️ BadRequest for {channel}: {error_msg}")
                 
-                if "user not found" in error_msg:
-                    logger.warning(f"👤 User {user_id} not found in {channel}")
-                elif "chat not found" in error_msg:
-                    logger.warning(f"💬 Chat {channel} not found")
+                # If bot can't see user (not admin), we need alternative approach
+                if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
+                    # For public channels, we can assume user can join
+                    if channel.startswith('@'):
+                        continue
+                    
+                    # For private groups, user needs to join
+                    return False
+                    
                 elif "user not participant" in error_msg:
-                    logger.info(f"👥 User {user_id} is not a participant in {channel}")
-                elif "bot is not a member" in error_msg:
-                    logger.warning(f"🤖 Bot is not a member of {channel}")
-                elif "bot was kicked" in error_msg:
-                    logger.warning(f"🚫 Bot was kicked from {channel}")
-                elif "not enough rights" in error_msg:
-                    logger.warning(f"🔒 Bot doesn't have enough rights in {channel}")
+                    return False
                 else:
-                    logger.error(f"❌ Unknown BadRequest for {channel}: {e}")
-                
-                return False
+                    return False
                     
         except Exception as e:
-            logger.error(f"💥 Channel check error for {channel}: {e}")
+            logger.error(f"Error checking {channel}: {e}")
             return False
     
-    logger.info(f"🎉 All REAL-TIME membership checks passed for user {user_id}")
     return True
 
 async def verify_user_membership(user_id: int) -> bool:
-    """REAL-TIME CHECK: Check if user is member of ALL support channels without context."""
+    """Check if user is member of ALL support channels without context."""
     from telegram import Bot
     
     support_channels = get_support_channels()
     if not support_channels:
         return True
-    
-    logger.info(f"🔍 REAL-TIME VERIFY: Checking membership for user {user_id}")
     
     try:
         bot_token = os.environ.get("TELEGRAM_TOKEN")
@@ -296,52 +282,43 @@ async def verify_user_membership(user_id: int) -> bool:
                     except ValueError:
                         chat_id = f"@{channel}"
                 
-                logger.info(f"🔍 (verify) REAL-TIME checking user {user_id} in {channel}")
-                
+                # Try to check membership
                 try:
                     chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                    logger.info(f"📊 (verify) User {user_id} status in {channel}: {chat_member.status}")
                     
                     if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
-                        logger.info(f"✅ (verify) User {user_id} is a member of {channel}")
                         continue
                     else:
-                        logger.warning(f"❌ (verify) User {user_id} is not a member of {channel}. Status: {chat_member.status}")
                         return False
                         
                 except BadRequest as e:
                     error_msg = str(e).lower()
-                    logger.error(f"⚠️ (verify) BadRequest for {channel}: {error_msg}")
                     
-                    if "user not found" in error_msg:
-                        logger.warning(f"👤 (verify) User {user_id} not found in {channel}")
-                    elif "chat not found" in error_msg:
-                        logger.warning(f"💬 (verify) Chat {channel} not found")
+                    # Handle cases where bot can't check directly
+                    if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
+                        # For public channels, assume user can join
+                        if channel.startswith('@'):
+                            continue
+                        
+                        # For private, user needs to join
+                        return False
+                        
                     elif "user not participant" in error_msg:
-                        logger.info(f"👥 (verify) User {user_id} is not participant in {channel}")
-                    elif "bot is not a member" in error_msg:
-                        logger.warning(f"🤖 (verify) Bot is not a member of {channel}")
-                    elif "bot was kicked" in error_msg:
-                        logger.warning(f"🚫 (verify) Bot was kicked from {channel}")
-                    elif "not enough rights" in error_msg:
-                        logger.warning(f"🔒 (verify) Bot doesn't have enough rights in {channel}")
+                        return False
                     else:
-                        logger.error(f"❌ (verify) Unknown BadRequest for {channel}: {e}")
-                    
-                    return False
+                        return False
                         
             except Exception as e:
-                logger.error(f"💥 (verify) Error processing {channel}: {e}")
+                logger.error(f"Error processing {channel}: {e}")
                 return False
                 
-        logger.info(f"🎉 (verify) All REAL-TIME membership checks passed for user {user_id}")
         return True
     except Exception as e:
-        logger.error(f"💥 Bot initialization error: {e}")
+        logger.error(f"Bot initialization error: {e}")
         return False
 
-async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) -> Dict[str, Any]:
-    """REAL-TIME: Get channel information including membership status, invite links, channel titles, and logos."""
+async def get_channel_info_for_user(user_id: int) -> Dict[str, Any]:
+    """Get channel information including membership status, invite links, channel titles."""
     support_channels = get_support_channels()
     if not support_channels:
         return {
@@ -352,8 +329,6 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
         }
     
     from telegram import Bot
-    
-    logger.info(f"🔍 get_channel_info_for_user: REAL-TIME check for user {user_id}")
     
     try:
         bot_token = os.environ.get("TELEGRAM_TOKEN")
@@ -385,21 +360,11 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                 # Get chat info
                 chat_title = format_channel_name(channel)
                 invite_link = None
-                logo_url = None
                 
                 try:
                     chat = await bot.get_chat(chat_id)
                     chat_title = chat.title or format_channel_name(channel)
                     chat_username = getattr(chat, 'username', None)
-                    
-                    # Get channel photo URL
-                    try:
-                        if chat.photo:
-                            channel_data = channels_collection.find_one({"channel_id": channel})
-                            if channel_data and channel_data.get("photo_id"):
-                                logo_url = f"{os.environ.get('RENDER_EXTERNAL_URL')}/channel_photo/{channel}"
-                    except:
-                        pass
                     
                     # Get or create invite link
                     if chat.invite_link:
@@ -423,7 +388,7 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                             else:
                                 invite_link = f"https://t.me/{channel}"
                     
-                    # Update channel info in database (cache only)
+                    # Update channel info in database
                     channels_collection.update_one(
                         {"channel_id": channel},
                         {"$set": {
@@ -444,44 +409,31 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                     else:
                         invite_link = f"https://t.me/{channel}"
                 
-                # REAL-TIME: Check membership with Telegram API (never from cache)
+                # Check membership
                 is_channel_member = False
-                membership_status = "unknown"
                 
                 try:
                     chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-                    membership_status = chat_member.status
-                    logger.info(f"🔍 REAL-TIME: User {user_id} status in {channel}: {membership_status}")
                     
                     if chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.RESTRICTED]:
                         is_channel_member = True
-                        logger.info(f"✅ REAL-TIME: User {user_id} is member of {channel} (status: {membership_status})")
-                    else:
-                        logger.warning(f"❌ REAL-TIME: User {user_id} is NOT member of {channel}. Status: {membership_status}")
                         
                 except BadRequest as e:
                     error_msg = str(e).lower()
-                    logger.error(f"⚠️ REAL-TIME Membership check failed for {channel}: {error_msg}")
                     
-                    if "user not found" in error_msg:
-                        logger.warning(f"👤 User {user_id} not found in {channel}")
-                    elif "chat not found" in error_msg:
-                        logger.warning(f"💬 Chat {channel} not found")
+                    # Handle cases where bot can't check directly
+                    if "user not found" in error_msg or "not enough rights" in error_msg or "bot is not a member" in error_msg:
+                        # For public channels, assume user can join
+                        if channel.startswith('@'):
+                            is_channel_member = True
+                        else:
+                            is_channel_member = False
                     elif "user not participant" in error_msg:
-                        logger.info(f"👥 User {user_id} is not participant in {channel}")
-                    elif "bot is not a member" in error_msg:
-                        logger.warning(f"🤖 Bot is not a member of {channel}")
-                    elif "bot was kicked" in error_msg:
-                        logger.warning(f"🚫 Bot was kicked from {channel}")
-                    elif "not enough rights" in error_msg:
-                        logger.warning(f"🔒 Bot doesn't have enough rights in {channel}")
+                        is_channel_member = False
                     else:
-                        logger.error(f"❌ Unknown BadRequest for {channel}: {e}")
-                    
-                    membership_status = f"error: {error_msg[:50]}"
+                        is_channel_member = False
                 except Exception as e:
-                    logger.error(f"💥 REAL-TIME: Failed to check membership for {channel}: {e}")
-                    membership_status = f"exception: {str(e)[:50]}"
+                    is_channel_member = False
                 
                 if not is_channel_member:
                     is_member = False
@@ -491,13 +443,11 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                     "channel_title": chat_title,
                     "invite_link": invite_link,
                     "is_member": is_channel_member,
-                    "membership_status": membership_status,
                     "display_name": chat_title,
-                    "logo_url": logo_url
                 })
                 
             except Exception as e:
-                logger.error(f"💥 Error processing channel {channel}: {e}")
+                logger.error(f"Error processing channel {channel}: {e}")
                 # Fallback with basic info
                 chat_title = format_channel_name(channel)
                 
@@ -506,9 +456,7 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                     "channel_title": chat_title,
                     "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
                     "is_member": False,
-                    "membership_status": "processing_error",
                     "display_name": chat_title,
-                    "logo_url": None
                 })
                 is_member = False
         
@@ -523,7 +471,7 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
         }
         
     except Exception as e:
-        logger.error(f"💥 Bot initialization error: {e}")
+        logger.error(f"Bot initialization error: {e}")
         # Fallback response
         fallback_channels = []
         for channel in support_channels:
@@ -534,9 +482,7 @@ async def get_channel_info_for_user(user_id: int, force_real_time: bool = True) 
                 "channel_title": chat_title,
                 "invite_link": f"https://t.me/{channel[1:]}" if channel.startswith('@') else f"https://t.me/c/{channel[4:]}" if channel.startswith('-100') else f"https://t.me/{channel}",
                 "is_member": False,
-                "membership_status": "bot_error",
                 "display_name": chat_title,
-                "logo_url": None
             })
         
         return {
@@ -565,18 +511,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         upsert=True
     )
     
-    # Check channel membership - ALWAYS REAL-TIME
+    # Check channel membership
     support_channels = get_support_channels()
     if support_channels:
-        logger.info(f"🚀 /start command from user {user_id}")
-        logger.info(f"📋 Support channels: {support_channels}")
-        
-        # ALWAYS check membership in real-time
+        # Use normal checking
         is_member = await check_channel_membership(user_id, context)
         
         if not is_member:
             # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(user_id, force_real_time=True)
+            channel_info = await get_channel_info_for_user(user_id)
             
             # If there's a protected link argument, include it in callback data
             if context.args:
@@ -674,7 +617,7 @@ I help you keep your channel links safe & secure.
     support_channels = get_support_channels()
     if support_channels:
         # Get channel info and create individual buttons
-        channel_info = await get_channel_info_for_user(user_id, force_real_time=True)
+        channel_info = await get_channel_info_for_user(user_id)
         
         # Add individual channel buttons
         for i in range(0, len(channel_info["channels"]), 2):
@@ -699,8 +642,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     
     if query.data == "check_join":
-        logger.info(f"👤 User {query.from_user.id} clicked 'Check Membership'")
-        # ALWAYS check in real-time
         is_member = await check_channel_membership(query.from_user.id, context)
         if is_member:
             await query.message.edit_text(
@@ -714,9 +655,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif query.data.startswith("check_join_"):
         # Handle check join for protected links
         encoded_id = query.data.replace("check_join_", "")
-        logger.info(f"👤 User {query.from_user.id} checking membership for protected link {encoded_id}")
         
-        # ALWAYS check in real-time
         is_member = await check_channel_membership(query.from_user.id, context)
         if is_member:
             # User has joined, show protected link
@@ -759,15 +698,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Create protected link for ANY Telegram link (group or channel)."""
-    # Check channel membership - ALWAYS REAL-TIME
+    # Check channel membership
     support_channels = get_support_channels()
     if support_channels:
-        logger.info(f"🛡️ /protect command from user {update.effective_user.id}")
-        # ALWAYS check in real-time
         is_member = await check_channel_membership(update.effective_user.id, context)
         if not is_member:
             # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(update.effective_user.id, force_real_time=True)
+            channel_info = await get_channel_info_for_user(update.effective_user.id)
             
             # Create keyboard with separate buttons for each channel
             keyboard = []
@@ -861,14 +798,13 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Revoke a link."""
-    # Check channel membership - ALWAYS REAL-TIME
+    # Check channel membership
     support_channels = get_support_channels()
     if support_channels:
-        # ALWAYS check in real-time
         is_member = await check_channel_membership(update.effective_user.id, context)
         if not is_member:
             # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(update.effective_user.id, force_real_time=True)
+            channel_info = await get_channel_info_for_user(update.effective_user.id)
             
             # Create keyboard with separate buttons for each channel
             keyboard = []
@@ -1164,15 +1100,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Show help."""
     user_id = update.effective_user.id
     
-    # Check channel membership - ALWAYS REAL-TIME
+    # Check channel membership
     support_channels = get_support_channels()
     if support_channels:
-        logger.info(f"📖 /help command from user {user_id}")
-        # ALWAYS check in real-time
         is_member = await check_channel_membership(user_id, context)
         if not is_member:
             # Get channel info and invite links
-            channel_info = await get_channel_info_for_user(user_id, force_real_time=True)
+            channel_info = await get_channel_info_for_user(user_id)
             
             # Create keyboard with separate buttons for each channel
             keyboard = []
@@ -1205,7 +1139,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     support_channels = get_support_channels()
     if support_channels:
         # Get channel info and create individual buttons
-        channel_info = await get_channel_info_for_user(user_id, force_real_time=True)
+        channel_info = await get_channel_info_for_user(user_id)
         
         # Add individual channel buttons (split into rows of 2)
         for i in range(0, len(channel_info["channels"]), 2):
@@ -1405,8 +1339,8 @@ async def check_membership_api(token: str, user_id: int):
     except Exception as e:
         logger.error(f"Failed to track page view: {e}")
     
-    # REAL-TIME: Get channel membership info
-    channel_info = await get_channel_info_for_user(user_id, force_real_time=True)
+    # Get channel membership info
+    channel_info = await get_channel_info_for_user(user_id)
     
     return {
         "is_member": channel_info["is_member"],
@@ -1476,7 +1410,7 @@ async def join_page(request: Request, token: str, user_id: int):
     if not link_data:
         raise HTTPException(status_code=404, detail="Link not found")
     
-    # REAL-TIME: Check membership
+    # Check membership
     is_member = await verify_user_membership(user_id)
     if not is_member:
         # Track failed join attempt (potential ad revenue lost)
