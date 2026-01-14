@@ -5,7 +5,7 @@ import base64
 import asyncio
 import datetime
 import io
-import requests  # Added import
+import requests
 from typing import Optional, List, Dict, Any
 from pymongo import MongoClient
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -665,42 +665,63 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             else:
                 callback_data = "check_join"
             
-            # Create keyboard with separate buttons for each channel
+            # Create keyboard with buttons only for channels user hasn't joined
             keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2 for better layout)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
+
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
+                
+                # Add tutorial and contact buttons in a new row
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+            else:
+                # User has joined all channels - this shouldn't happen but as a fallback
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=callback_data)])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            channel_count = len(support_channels)
+            # Update message text
             if context.args:
                 message_text = (
                     f"🔐 *This is a Protected Link*\n\n"
-                    f"Join our {channel_count} channel(s) first to access this link.\n"
+                    f"Join the channel(s) below first to access this link.\n"
                     f"Then click 'Check Membership' below."
                 )
             else:
                 message_text = (
-                    f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+                    f"🔐 Join the channel(s) below first to use this bot.\n"
                     "Then click 'Check Membership' below."
                 )
             
+            # Send message with link preview disabled
             await update.message.reply_text(
                 message_text,
                 reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN if context.args else None
+                parse_mode=ParseMode.MARKDOWN if context.args else None,
+                disable_web_page_preview=True  # Turn off link preview
             )
             return
     
@@ -721,10 +742,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(
                 "🔐 This is a Protected Link\n\n"
                 "Click the button below to proceed.",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True  # Turn off link preview
             )
         else:
-            await update.message.reply_text("❌ Link expired or revoked")
+            await update.message.reply_text("❌ Link expired or revoked", disable_web_page_preview=True)
         return
     
     # If no args, show beautiful welcome message
@@ -757,7 +779,7 @@ I help you keep your channel links safe & secure.
         # Get channel info and create individual buttons
         channel_info = await get_channel_info_for_user(user_id)
         
-        # Add individual channel buttons (split into rows of 2)
+        # Show all channels for promotion (not just unjoined ones)
         for i in range(0, len(channel_info["channels"]), 2):
             row_buttons = []
             for j in range(2):
@@ -768,11 +790,18 @@ I help you keep your channel links safe & secure.
             if row_buttons:
                 keyboard.append(row_buttons)
     
+    # Add tutorial and contact buttons
+    keyboard.append([
+        InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+        InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+    ])
+    
+    # Add create link button
     keyboard.append([InlineKeyboardButton("🚀 Create Protected Link", callback_data="create_link")])
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
-    await update.message.reply_text(welcome_msg, reply_markup=reply_markup)
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup, disable_web_page_preview=True)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button callbacks."""
@@ -781,23 +810,66 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if query.data == "check_join":
         logger.info(f"User {query.from_user.id} clicked 'Check Membership'")
-        is_member = await check_channel_membership(query.from_user.id, context)
-        if is_member:
+        
+        # Get updated channel info
+        channel_info = await get_channel_info_for_user(query.from_user.id)
+        
+        if channel_info["is_member"]:
             await query.message.edit_text(
                 "✅ Verified!\n"
                 "You can now use the bot.\n\n"
-                "Use /help for commands."
+                "Use /help for commands.",
+                disable_web_page_preview=True
             )
         else:
-            await query.answer("❌ Not joined yet. Please join channel(s) first.", show_alert=True)
+            # Create updated keyboard with only unjoined channels
+            keyboard = []
+            
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+            
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.message.edit_text(
+                    f"🔐 Join the channel(s) below to use this bot.\n"
+                    "Then click 'Check Membership' below.",
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
+                )
+            else:
+                # This shouldn't happen but handle gracefully
+                await query.answer("❌ Not joined yet. Please join channel(s) first.", show_alert=True)
     
     elif query.data.startswith("check_join_"):
         # Handle check join for protected links
         encoded_id = query.data.replace("check_join_", "")
         logger.info(f"User {query.from_user.id} checking membership for protected link {encoded_id}")
         
-        is_member = await check_channel_membership(query.from_user.id, context)
-        if is_member:
+        # Get updated channel info
+        channel_info = await get_channel_info_for_user(query.from_user.id)
+        
+        if channel_info["is_member"]:
             # User has joined, show protected link
             link_data = links_collection.find_one({"_id": encoded_id, "active": True})
             
@@ -811,26 +883,79 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await query.message.edit_text(
                     "✅ Verified!\n\n"
                     "You can now access the protected link.",
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
                 )
             else:
-                await query.message.edit_text("❌ Link expired or revoked")
+                await query.message.edit_text("❌ Link expired or revoked", disable_web_page_preview=True)
         else:
-            await query.answer("❌ Not joined yet. Please join channel(s) first.", show_alert=True)
+            # Create updated keyboard with only unjoined channels
+            keyboard = []
+            
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+            
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button with the same encoded_id
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data=f"check_join_{encoded_id}")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Update message text to reflect current status
+                if encoded_id:
+                    message_text = (
+                        f"🔐 *This is a Protected Link*\n\n"
+                        f"Join the channel(s) below first to access this link.\n"
+                        f"Then click 'Check Membership' below."
+                    )
+                else:
+                    message_text = (
+                        f"🔐 Join the channel(s) below to use this bot.\n"
+                        "Then click 'Check Membership' below."
+                    )
+                
+                await query.message.edit_text(
+                    message_text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN if encoded_id else None,
+                    disable_web_page_preview=True
+                )
+            else:
+                await query.answer("❌ Not joined yet. Please join channel(s) first.", show_alert=True)
     
     elif query.data == "create_link":
         await query.message.reply_text(
             "To create a protected link, use:\n\n"
             "`/protect https://t.me/yourchannel`\n\n"
-            "Replace with your actual channel link.",
-            parse_mode=ParseMode.MARKDOWN
+            "Replace with your actual channel link.\n\n"
+            "*Tutorial:* https://t.me/team\\_secret\\_tutorial\\_video/5\n"
+            "*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
     
     elif query.data == "confirm_broadcast":
         await handle_broadcast_confirmation(update, context)
     
     elif query.data == "cancel_broadcast":
-        await query.message.edit_text("❌ Broadcast cancelled")
+        await query.message.edit_text("❌ Broadcast cancelled", disable_web_page_preview=True)
     
     elif query.data.startswith("revoke_"):
         link_id = query.data.replace("revoke_", "")
@@ -847,29 +972,48 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             # Get channel info and invite links
             channel_info = await get_channel_info_for_user(update.effective_user.id)
             
-            # Create keyboard with separate buttons for each channel
+            # Create keyboard with buttons only for channels user hasn't joined
             keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+            else:
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+                
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            channel_count = len(support_channels)
             await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+                f"🔐 Join the channel(s) below to use this bot.\n"
                 "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
             )
             return
     
@@ -879,8 +1023,11 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "This works for:\n"
             "• Channels (public/private)\n"
             "• Groups (public/private)\n"
-            "• Supergroups",
-            parse_mode=ParseMode.MARKDOWN
+            "• Supergroups\n\n"
+            "*Tutorial:* https://t.me/team\\_secret\\_tutorial\\_video/5\n"
+            "*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
 
@@ -888,7 +1035,7 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Validate the link (basic check)
     if not telegram_link.startswith("https://t.me/"):
-        await update.message.reply_text("❌ Invalid link. Must start with https://t.me/")
+        await update.message.reply_text("❌ Invalid link. Must start with https://t.me/", disable_web_page_preview=True)
         return
     
     unique_id = str(uuid.uuid4())
@@ -911,11 +1058,15 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     bot_username = (await context.bot.get_me()).username
     protected_link = f"https://t.me/{bot_username}?start={encoded_id}"
     
-    # Simple buttons
+    # Simple buttons with tutorial and contact
     keyboard = [
         [
             InlineKeyboardButton("📤 Share", url=f"https://t.me/share/url?url={protected_link}&text=🔐 Protected Link - Join via secure invitation"),
             InlineKeyboardButton("❌ Revoke", callback_data=f"revoke_{encoded_id}")
+        ],
+        [
+            InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+            InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -933,9 +1084,13 @@ async def protect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"📋 *Quick Actions:*\n"
         f"• Copy the link above\n"
         f"• Share with your audience\n"
-        f"• Revoke anytime with `/revoke {short_id}`",
+        f"• Revoke anytime with `/revoke {short_id}`\n\n"
+        f"💡 *Need Help?*\n"
+        f"• *Tutorial:* https://t.me/team\\_secret\\_tutorial\\_video/5\n"
+        f"• *Contact:* https://t.me/team\\_secret\\_cont\\_bot",
         reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -948,29 +1103,48 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # Get channel info and invite links
             channel_info = await get_channel_info_for_user(update.effective_user.id)
             
-            # Create keyboard with separate buttons for each channel
+            # Create keyboard with buttons only for channels user hasn't joined
             keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+            else:
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+                
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            channel_count = len(support_channels)
             await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
+                f"🔐 Join the channel(s) below to use this bot.\n"
                 "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
             )
             return
     
@@ -984,7 +1158,7 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ))
         
         if not active_links:
-            await update.message.reply_text("📭 No active links")
+            await update.message.reply_text("📭 No active links", disable_web_page_preview=True)
             return
         
         message = "🔐 *Your Active Links:*\n\n"
@@ -1001,6 +1175,12 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 callback_data=f"revoke_{link['_id']}"
             )])
         
+        # Add tutorial and contact buttons
+        keyboard.append([
+            InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+            InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+        ])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         message += "\nClick a button below to revoke."
@@ -1008,7 +1188,8 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(
             message,
             reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
@@ -1028,7 +1209,7 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     link_data = links_collection.find_one(query)
     
     if not link_data:
-        await update.message.reply_text("❌ Link not found")
+        await update.message.reply_text("❌ Link not found", disable_web_page_preview=True)
         return
     
     # Revoke
@@ -1045,8 +1226,10 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         f"✅ *Link Revoked!*\n\n"
         f"Link `{link_data.get('short_id', link_id)}` has been permanently revoked.\n\n"
-        f"⚠️ All future access attempts will be blocked.",
-        parse_mode=ParseMode.MARKDOWN
+        f"⚠️ All future access attempts will be blocked.\n\n"
+        f"*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE, link_id: str):
@@ -1059,14 +1242,16 @@ async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if not link_data:
         await query.message.edit_text(
             "❌ Link not found or already revoked.",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
     if link_data['created_by'] != query.from_user.id:
         await query.message.edit_text(
             "❌ You don't have permission to revoke this link.",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
@@ -1085,8 +1270,10 @@ async def handle_revoke_link(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"✅ *Link Revoked!*\n\n"
         f"Link `{link_data.get('short_id', link_id[:8])}` has been revoked.\n"
         f"👥 Final Clicks: {link_data.get('clicks', 0)}\n\n"
-        f"⚠️ All access has been permanently blocked.",
-        parse_mode=ParseMode.MARKDOWN
+        f"⚠️ All access has been permanently blocked.\n\n"
+        f"*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1095,8 +1282,10 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if update.effective_user.id != admin_id:
         await update.message.reply_text(
             "🔒 *Admin Access Required*\n\n"
-            "This command is restricted to administrators only.",
-            parse_mode=ParseMode.MARKDOWN
+            "This command is restricted to administrators only.\n\n"
+            "*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
@@ -1111,8 +1300,10 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "• Supports all media types\n"
             "• Preserves formatting\n"
             "• Tracks delivery\n"
-            "• No rate limiting",
-            parse_mode=ParseMode.MARKDOWN
+            "• No rate limiting\n\n"
+            "*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
@@ -1134,7 +1325,8 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"• ⚡ Delivery: Instant\n\n"
         f"Are you sure you want to proceed?",
         reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
     
     context.user_data['broadcast_message'] = update.message.reply_to_message
@@ -1144,7 +1336,7 @@ async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DE
     query = update.callback_query
     await query.answer()
     
-    await query.message.edit_text("📤 *Broadcasting...*\n\nPlease wait, this may take a moment.", parse_mode=ParseMode.MARKDOWN)
+    await query.message.edit_text("📤 *Broadcasting...*\n\nPlease wait, this may take a moment.", parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     
     users = list(users_collection.find({}))
     total_users = len(users)
@@ -1181,7 +1373,8 @@ async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DE
         f"• 📈 Success Rate: `{success_rate:.1f}%`\n"
         f"• ⏰ Time: {datetime.datetime.now().strftime('%H:%M:%S')}\n\n"
         f"✨ Broadcast logged in system.",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1190,8 +1383,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.effective_user.id != admin_id:
         await update.message.reply_text(
             "🔒 *Admin Access Required*\n\n"
-            "This command is restricted to administrators only.",
-            parse_mode=ParseMode.MARKDOWN
+            "This command is restricted to administrators only.\n\n"
+            "*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True
         )
         return
     
@@ -1234,8 +1429,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"• 🗄️ Database: 🟢 Operational\n"
         f"• 🤖 Bot: 🟢 Online\n"
         f"• ⚡ Uptime: 100%\n"
-        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        parse_mode=ParseMode.MARKDOWN
+        f"• 🕐 Last Update: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1251,29 +1448,51 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             # Get channel info and invite links
             channel_info = await get_channel_info_for_user(user_id)
             
-            # Create keyboard with separate buttons for each channel
+            # Create keyboard with buttons only for channels user hasn't joined
             keyboard = []
-            
-            # Add individual channel buttons (split into rows of 2)
-            for i in range(0, len(channel_info["channels"]), 2):
-                row_buttons = []
-                for j in range(2):
-                    if i + j < len(channel_info["channels"]):
-                        channel = channel_info["channels"][i + j]
-                        button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
-                        row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
-                if row_buttons:
-                    keyboard.append(row_buttons)
-            
-            # Add check button
-            keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+
+            # Filter channels to show only those not joined
+            not_joined_channels = [ch for ch in channel_info["channels"] if not ch['is_member']]
+
+            if not_joined_channels:
+                # Show channels user needs to join
+                for i in range(0, len(not_joined_channels), 2):
+                    row_buttons = []
+                    for j in range(2):
+                        if i + j < len(not_joined_channels):
+                            channel = not_joined_channels[i + j]
+                            button_text = f"📢 {channel['display_name'][:15]}"  # Limit text length
+                            row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
+                    if row_buttons:
+                        keyboard.append(row_buttons)
+                
+                # Add check button
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+            else:
+                keyboard.append([InlineKeyboardButton("✅ Check Membership", callback_data="check_join")])
+                
+                # Add tutorial and contact buttons
+                keyboard.append([
+                    InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+                    InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+                ])
+                
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            channel_count = len(support_channels)
             await update.message.reply_text(
-                f"🔐 Join our {channel_count} channel(s) first to use this bot.\n"
-                "Then click 'Check Membership' below.",
-                reply_markup=reply_markup
+                f"🔐 Join the channel(s) below to use this bot.\n"
+                "Then click 'Check Membership' below.\n\n"
+                f"*Tutorial:* https://t.me/team\\_secret\\_tutorial\\_video/5\n"
+                f"*Contact:* https://t.me/team\\_secret\\_cont\\_bot",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
             )
             return
     
@@ -1284,7 +1503,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Get channel info and create individual buttons
         channel_info = await get_channel_info_for_user(user_id)
         
-        # Add individual channel buttons (split into rows of 2)
+        # Show all channels for promotion (not just unjoined ones)
         for i in range(0, len(channel_info["channels"]), 2):
             row_buttons = []
             for j in range(2):
@@ -1294,6 +1513,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     row_buttons.append(InlineKeyboardButton(button_text, url=channel["invite_link"]))
             if row_buttons:
                 keyboard.append(row_buttons)
+    
+    # Add tutorial and contact buttons
+    keyboard.append([
+        InlineKeyboardButton("📺 Tutorial", url="https://t.me/team_secret_tutorial_video/5"),
+        InlineKeyboardButton("📞 Contact", url="https://t.me/team_secret_cont_bot")
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     
@@ -1320,9 +1545,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Works with any t.me link\n"
         "• Monitor link analytics\n"
         "• Revoke unused links\n"
-        "• Join our support channels",
+        "• Join our support channels\n\n"
+        "*Tutorial Video:*\n"
+        "https://t.me/team\\_secret\\_tutorial\\_video/5\n\n"
+        "*Contact Owner:*\n"
+        "https://t.me/team\\_secret\\_cont\\_bot",
         reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
     )
 
 async def store_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1432,7 +1662,9 @@ async def verify_page(request: Request, token: str, user_id: Optional[int] = Non
         {
             "request": request, 
             "token": token,
-            "user_id": user_id  # Pass user_id to template for tracking
+            "user_id": user_id,  # Pass user_id to template for tracking
+            "tutorial_link": "https://t.me/team_secret_tutorial_video/5",
+            "contact_bot": "https://t.me/team_secret_cont_bot"
         }
     )
 
@@ -1486,7 +1718,9 @@ async def check_membership_api(token: str, user_id: int):
         "is_member": channel_info["is_member"],
         "channels": channel_info["channels"],  # Now includes channel_title and logo_url
         "channel_count": channel_info["channel_count"],
-        "invite_link": channel_info["invite_link"]
+        "invite_link": channel_info["invite_link"],
+        "tutorial_link": "https://t.me/team_secret_tutorial_video/5",
+        "contact_bot": "https://t.me/team_secret_cont_bot"
     }
 
 @app.get("/channel_photo/{channel_id}")
@@ -1581,7 +1815,9 @@ async def join_page(request: Request, token: str, user_id: int):
     return templates.TemplateResponse("join.html", {
         "request": request, 
         "token": token,
-        "user_id": user_id  # Pass user_id for tracking
+        "user_id": user_id,  # Pass user_id for tracking
+        "tutorial_link": "https://t.me/team_secret_tutorial_video/5",
+        "contact_bot": "https://t.me/team_secret_cont_bot"
     })
 
 @app.get("/getgrouplink/{token}")
@@ -1621,7 +1857,9 @@ async def get_ad_stats():
             {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": 10}
-        ]))
+        ])),
+        "contact_bot": "https://t.me/team_secret_cont_bot",
+        "tutorial_link": "https://t.me/team_secret_tutorial_video/5"
     }
     
     return stats
@@ -1647,6 +1885,8 @@ async def root():
         "version": "2.1.0",
         "time": datetime.datetime.now().isoformat(),
         "database": db_status,
+        "contact": "https://t.me/team_secret_cont_bot",
+        "tutorial": "https://t.me/team_secret_tutorial_video/5",
         "stats": {
             "total_users": total_users,
             "active_links": active_links,
